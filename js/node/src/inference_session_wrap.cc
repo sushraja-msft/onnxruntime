@@ -29,7 +29,8 @@ Napi::Object InferenceSessionWrap::Init(Napi::Env env, Napi::Object exports) {
 
   Napi::Function func = DefineClass(
       env, "InferenceSession",
-      {InstanceMethod("loadModel", &InferenceSessionWrap::LoadModel), InstanceMethod("run", &InferenceSessionWrap::Run),
+      {InstanceMethod("loadModel", &InferenceSessionWrap::LoadModel),
+       InstanceMethod("run", &InferenceSessionWrap::Run),
        InstanceMethod("dispose", &InferenceSessionWrap::Dispose),
        InstanceAccessor("inputNames", &InferenceSessionWrap::GetInputNames, nullptr, napi_default, nullptr),
        InstanceAccessor("outputNames", &InferenceSessionWrap::GetOutputNames, nullptr, napi_default, nullptr)});
@@ -135,6 +136,12 @@ Napi::Value InferenceSessionWrap::LoadModel(const Napi::CallbackInfo& info) {
                                                      ? typeInfo.GetTensorTypeAndShapeInfo().GetElementType()
                                                      : ONNX_TENSOR_ELEMENT_DATA_TYPE_UNDEFINED);
     }
+
+    // cache preferred output locations
+    ParsePreferredOutputLocations(info[argsLength - 1].As<Napi::Object>(), outputNames_, preferredOutputLocations_);
+    if (preferredOutputLocations_.size() > 0) {
+      ioBinding_ = std::make_unique<Ort::IoBinding>(*session_);
+    }
   } catch (Napi::Error const& e) {
     throw e;
   } catch (std::exception const& e) {
@@ -184,7 +191,8 @@ Napi::Value InferenceSessionWrap::Run(const Napi::CallbackInfo& info) {
   std::vector<bool> reuseOutput;
   size_t inputIndex = 0;
   size_t outputIndex = 0;
-  OrtMemoryInfo* memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault).release();
+  OrtMemoryInfo* cpuMemoryInfo = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault).release();
+  Ort::MemoryInfo gpuBufferMemoryInfo{"WebGPU_Buffer", OrtDeviceAllocator, 0, OrtMemTypeDefault};
 
   try {
     for (auto& name : inputNames_) {
@@ -192,7 +200,7 @@ Napi::Value InferenceSessionWrap::Run(const Napi::CallbackInfo& info) {
         inputIndex++;
         inputNames_cstr.push_back(name.c_str());
         auto value = feed.Get(name);
-        inputValues.push_back(NapiValueToOrtValue(env, value, memory_info));
+        inputValues.push_back(NapiValueToOrtValue(env, value, cpuMemoryInfo, gpuBufferMemoryInfo));
       }
     }
     for (auto& name : outputNames_) {
@@ -201,7 +209,7 @@ Napi::Value InferenceSessionWrap::Run(const Napi::CallbackInfo& info) {
         outputNames_cstr.push_back(name.c_str());
         auto value = fetch.Get(name);
         reuseOutput.push_back(!value.IsNull());
-        outputValues.emplace_back(value.IsNull() ? Ort::Value{nullptr} : NapiValueToOrtValue(env, value, memory_info));
+        outputValues.emplace_back(value.IsNull() ? Ort::Value{nullptr} : NapiValueToOrtValue(env, value, cpuMemoryInfo, gpuBufferMemoryInfo));
       }
     }
 
@@ -210,19 +218,41 @@ Napi::Value InferenceSessionWrap::Run(const Napi::CallbackInfo& info) {
       runOptions = Ort::RunOptions{};
       ParseRunOptions(info[2].As<Napi::Object>(), runOptions);
     }
+    if (preferredOutputLocations_.size() == 0) {
+      session_->Run(runOptions == nullptr ? *defaultRunOptions_.get() : runOptions,
+                    inputIndex == 0 ? nullptr : &inputNames_cstr[0], inputIndex == 0 ? nullptr : &inputValues[0],
+                    inputIndex, outputIndex == 0 ? nullptr : &outputNames_cstr[0],
+                    outputIndex == 0 ? nullptr : &outputValues[0], outputIndex);
 
-    session_->Run(runOptions == nullptr ? *defaultRunOptions_.get() : runOptions,
-                  inputIndex == 0 ? nullptr : &inputNames_cstr[0], inputIndex == 0 ? nullptr : &inputValues[0],
-                  inputIndex, outputIndex == 0 ? nullptr : &outputNames_cstr[0],
-                  outputIndex == 0 ? nullptr : &outputValues[0], outputIndex);
+      Napi::Object result = Napi::Object::New(env);
 
-    Napi::Object result = Napi::Object::New(env);
+      for (size_t i = 0; i < outputIndex; i++) {
+        result.Set(outputNames_[i], OrtValueToNapiValue(env, outputValues[i]));
+      }
+      return scope.Escape(result);
+    } else {
+      // IO binding
+      ORT_NAPI_THROW_ERROR_IF(preferredOutputLocations_.size() != outputNames_.size(), env,
+                              "Preferred output locations must have the same size as output names.");
 
-    for (size_t i = 0; i < outputIndex; i++) {
-      result.Set(outputNames_[i], OrtValueToNapiValue(env, outputValues[i]));
+      for (size_t i = 0; i < inputIndex; i++) {
+        ioBinding_->BindInput(inputNames_cstr[i], inputValues[i]);
+      }
+      for (size_t i = 0; i < outputIndex; i++) {
+        if (preferredOutputLocations_[i] == DATA_LOCATION_GPU_BUFFER) {
+          ioBinding_->BindOutput(outputNames_cstr[i], gpuBufferMemoryInfo);
+        } else {
+          ioBinding_->BindOutput(outputNames_cstr[i], cpuMemoryInfo);
+        }
+      }
+
+      session_->Run(runOptions == nullptr ? *defaultRunOptions_.get() : runOptions, *ioBinding_);
+      Napi::Object result = Napi::Object::New(env);
+      for (size_t i = 0; i < outputIndex; i++) {
+        result.Set(outputNames_[i], OrtValueToNapiValue(env, outputValues[i]));
+      }
+      return scope.Escape(result);
     }
-
-    return scope.Escape(result);
   } catch (Napi::Error const& e) {
     throw e;
   } catch (std::exception const& e) {
@@ -234,6 +264,8 @@ Napi::Value InferenceSessionWrap::Dispose(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
   ORT_NAPI_THROW_ERROR_IF(!this->initialized_, env, "Session is not initialized.");
   ORT_NAPI_THROW_ERROR_IF(this->disposed_, env, "Session already disposed.");
+
+  this->ioBinding_.reset(nullptr);
 
   this->defaultRunOptions_.reset(nullptr);
   this->session_.reset(nullptr);

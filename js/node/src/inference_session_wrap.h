@@ -65,7 +65,7 @@ class InferenceSessionWrap : public Napi::ObjectWrap<InferenceSessionWrap> {
    * @throw error if status code != 0
    */
   Napi::Value Run(const Napi::CallbackInfo& info);
-
+  
   /**
    * [sync] dispose the session.
    * @param nothing
@@ -92,4 +92,8 @@ class InferenceSessionWrap : public Napi::ObjectWrap<InferenceSessionWrap> {
   std::vector<std::string> outputNames_;
   std::vector<ONNXType> outputTypes_;
   std::vector<ONNXTensorElementDataType> outputTensorElementDataTypes_;
+
+  // preferred output locations
+  std::vector<int> preferredOutputLocations_;
+  std::unique_ptr<Ort::IoBinding> ioBinding_;
 };

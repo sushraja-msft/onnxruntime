@@ -100,7 +100,7 @@ const std::unordered_map<std::string, ONNXTensorElementDataType> DATA_TYPE_NAME_
     {"float32", ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT}, {"uint8", ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8}, {"int8", ONNX_TENSOR_ELEMENT_DATA_TYPE_INT8}, {"uint16", ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT16}, {"int16", ONNX_TENSOR_ELEMENT_DATA_TYPE_INT16}, {"int32", ONNX_TENSOR_ELEMENT_DATA_TYPE_INT32}, {"int64", ONNX_TENSOR_ELEMENT_DATA_TYPE_INT64}, {"string", ONNX_TENSOR_ELEMENT_DATA_TYPE_STRING}, {"bool", ONNX_TENSOR_ELEMENT_DATA_TYPE_BOOL}, {"float16", ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT16}, {"float64", ONNX_TENSOR_ELEMENT_DATA_TYPE_DOUBLE}, {"uint32", ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT32}, {"uint64", ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT64}};
 
 // currently only support tensor
-Ort::Value NapiValueToOrtValue(Napi::Env env, Napi::Value value, OrtMemoryInfo* memory_info) {
+Ort::Value NapiValueToOrtValue(Napi::Env env, Napi::Value value, OrtMemoryInfo* cpu_memory_info, OrtMemoryInfo* webgpu_memory_info) {
   ORT_NAPI_THROW_TYPEERROR_IF(!value.IsObject(), env, "Tensor must be an object.");
 
   // check 'dims'
@@ -110,6 +110,7 @@ Ort::Value NapiValueToOrtValue(Napi::Env env, Napi::Value value, OrtMemoryInfo* 
 
   auto dimsArray = dimsValue.As<Napi::Array>();
   auto len = dimsArray.Length();
+  size_t elementSize = 1;
   std::vector<int64_t> dims;
   if (len > 0) {
     dims.reserve(len);
@@ -122,8 +123,15 @@ Ort::Value NapiValueToOrtValue(Napi::Env env, Napi::Value value, OrtMemoryInfo* 
                                    "Tensor.dims[", i, "] is invalid: ", dimDouble);
       int64_t dim = static_cast<int64_t>(dimDouble);
       dims.push_back(dim);
+      elementSize *= dim;
     }
   }
+
+  // check 'location'
+  auto tensorLocationValue = tensorObject.Get("location");
+  ORT_NAPI_THROW_TYPEERROR_IF(!tensorLocationValue.IsString(), env, "Tensor.location must be a string.");
+  DataLocation tensorLocation = ParseDataLocation(tensorLocationValue.As<Napi::String>().Utf8Value());
+  ORT_NAPI_THROW_RANGEERROR_IF(tensorLocation == DATA_LOCATION_NONE, env, "Tensor.location is not supported.");
 
   // check 'data' and 'type'
   auto tensorDataValue = tensorObject.Get("data");
@@ -133,6 +141,7 @@ Ort::Value NapiValueToOrtValue(Napi::Env env, Napi::Value value, OrtMemoryInfo* 
   auto tensorTypeString = tensorTypeValue.As<Napi::String>().Utf8Value();
 
   if (tensorTypeString == "string") {
+    ORT_NAPI_THROW_TYPEERROR_IF(tensorLocation != DATA_LOCATION_CPU, env, "Tensor.location must be 'cpu' for string tensors.");
     ORT_NAPI_THROW_TYPEERROR_IF(!tensorDataValue.IsArray(), env, "Tensor.data must be an array for string tensors.");
 
     auto tensorDataArray = tensorDataValue.As<Napi::Array>();
@@ -162,23 +171,33 @@ Ort::Value NapiValueToOrtValue(Napi::Env env, Napi::Value value, OrtMemoryInfo* 
     auto v = DATA_TYPE_NAME_TO_ID_MAP.find(tensorTypeString);
     ORT_NAPI_THROW_TYPEERROR_IF(v == DATA_TYPE_NAME_TO_ID_MAP.end(), env,
                                 "Tensor.type is not supported: ", tensorTypeString);
-
     ONNXTensorElementDataType elemType = v->second;
 
-    ORT_NAPI_THROW_TYPEERROR_IF(!tensorDataValue.IsTypedArray(), env,
-                                "Tensor.data must be a typed array for numeric tensor.");
+    if (tensorLocation == DATA_LOCATION_CPU) {
+      ORT_NAPI_THROW_TYPEERROR_IF(!tensorDataValue.IsTypedArray(), env,
+                                  "Tensor.data must be a typed array for numeric tensor.");
 
-    auto tensorDataTypedArray = tensorDataValue.As<Napi::TypedArray>();
-    auto typedArrayType = tensorDataValue.As<Napi::TypedArray>().TypedArrayType();
-    ORT_NAPI_THROW_TYPEERROR_IF(DATA_TYPE_TYPEDARRAY_MAP[elemType] != typedArrayType, env,
-                                "Tensor.data must be a typed array (", DATA_TYPE_TYPEDARRAY_MAP[elemType], ") for ",
-                                tensorTypeString, " tensors, but got typed array (", typedArrayType, ").");
+      auto tensorDataTypedArray = tensorDataValue.As<Napi::TypedArray>();
+      auto typedArrayType = tensorDataValue.As<Napi::TypedArray>().TypedArrayType();
+      ORT_NAPI_THROW_TYPEERROR_IF(DATA_TYPE_TYPEDARRAY_MAP[elemType] != typedArrayType, env,
+                                  "Tensor.data must be a typed array (", DATA_TYPE_TYPEDARRAY_MAP[elemType], ") for ",
+                                  tensorTypeString, " tensors, but got typed array (", typedArrayType, ").");
 
-    char* buffer = reinterpret_cast<char*>(tensorDataTypedArray.ArrayBuffer().Data());
-    size_t bufferByteOffset = tensorDataTypedArray.ByteOffset();
-    size_t bufferByteLength = tensorDataTypedArray.ByteLength();
-    return Ort::Value::CreateTensor(memory_info, buffer + bufferByteOffset, bufferByteLength,
-                                    dims.empty() ? nullptr : &dims[0], dims.size(), elemType);
+      char* buffer = reinterpret_cast<char*>(tensorDataTypedArray.ArrayBuffer().Data());
+      size_t bufferByteOffset = tensorDataTypedArray.ByteOffset();
+      size_t bufferByteLength = tensorDataTypedArray.ByteLength();
+      return Ort::Value::CreateTensor(cpu_memory_info, buffer + bufferByteOffset, bufferByteLength,
+                                      dims.empty() ? nullptr : &dims[0], dims.size(), elemType);
+    } else {
+      ORT_NAPI_THROW_TYPEERROR_IF(tensorLocation != DATA_LOCATION_GPU_BUFFER, env, "Tensor.location must be 'gpu-buffer' for IO binding.");
+
+      auto gpuBufferValue = tensorObject.Get("gpuBuffer");
+      // nodejs: tensor.gpuBuffer is no longer a GPUBuffer in nodejs. we assume it is an external object (bind a size_t value).
+      ORT_NAPI_THROW_TYPEERROR_IF(!gpuBufferValue.IsExternal(), env, "Tensor.gpuBuffer must be an external object.");
+      void* dataValue = gpuBufferValue.As<Napi::External<void>>().Data();
+      size_t dataByteLength = DATA_TYPE_ELEMENT_SIZE_MAP[elemType] * elementSize;
+      return Ort::Value::CreateTensor(webgpu_memory_info, dataValue, dataByteLength, dims.empty() ? nullptr : &dims[0], dims.size(), elemType);
+    }
   }
 }
 
@@ -211,6 +230,16 @@ Napi::Value OrtValueToNapiValue(Napi::Env env, Ort::Value& value) {
     dimsArray[i] = dims[i];
   }
   returnValue.Set("dims", dimsArray);
+
+  // location
+  auto memoryInfo = value.GetTensorMemoryInfo();
+  bool isGpuBuffer = memoryInfo.GetDeviceType() == OrtMemoryInfoDeviceType_GPU && memoryInfo.GetAllocatorName() == "WebGPU_Buffer";
+  if (isGpuBuffer) {
+    returnValue.Set("location", Napi::String::New(env, "gpu-buffer"));
+  } else {
+    // TODO: support more
+    returnValue.Set("location", Napi::String::New(env, "cpu"));
+  }
 
   // size
   auto size = tensorTypeAndShapeInfo.GetElementCount();
