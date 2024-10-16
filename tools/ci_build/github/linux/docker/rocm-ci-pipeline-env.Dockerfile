@@ -21,8 +21,10 @@ RUN apt-get update && \
     libelf1 \
     kmod \
     file \
-    python3 \
+    libstdc++6 \
     python3-pip \
+    python3.10-dev \
+    python3.10-venv \
     rocm-dev \
     rocm-libs \
     build-essential && \
@@ -56,33 +58,20 @@ RUN mkdir -p /tmp/ccache && \
     cp /tmp/ccache/ccache /usr/bin && \
     rm -rf /tmp/ccache
 
-# Install Conda
-ENV PATH /opt/miniconda/bin:${PATH}
-RUN wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda.sh --no-check-certificate && /bin/bash ~/miniconda.sh -b -p /opt/miniconda && \
-    conda init bash && \
-    conda config --set auto_activate_base false && \
-    conda update --all && \
-    rm ~/miniconda.sh && conda clean -ya
+WORKDIR /ort
 
-# Create rocm-ci environment
-ENV CONDA_ENVIRONMENT_PATH /opt/miniconda/envs/rocm-ci
-ENV CONDA_DEFAULT_ENV rocm-ci
-RUN conda create -y -n ${CONDA_DEFAULT_ENV} python=3.10
-ENV PATH ${CONDA_ENVIRONMENT_PATH}/bin:${PATH}
-
-# Enable rocm-ci environment
-SHELL ["conda", "run", "-n", "rocm-ci", "/bin/bash", "-c"]
+RUN python3 -m venv /ort/env \
+    && . /ort/env/bin/activate \
+    && pip install packaging \
+                   ml_dtypes==0.3.0 \
+                   pytest==7.4.4 \
+                   pytest-xdist \
+                   pytest-rerunfailures \
+                   scipy==1.10.0 \
+                   numpy==1.26.4
 
 # ln -sf is needed to make sure that version `GLIBCXX_3.4.30' is found
-RUN ln -sf /usr/lib/x86_64-linux-gnu/libstdc++.so.6 ${CONDA_ENVIRONMENT_PATH}/bin/../lib/libstdc++.so.6
-
-RUN pip install packaging \
-                ml_dtypes==0.3.0 \
-                pytest==7.4.4 \
-                pytest-xdist \
-                pytest-rerunfailures \
-                scipy==1.10.0 \
-                numpy==1.24.1
+# RUN ln -sf /usr/lib/x86_64-linux-gnu/libstdc++.so.6 ${CONDA_ENVIRONMENT_PATH}/bin/../lib/libstdc++.so.6
 
 RUN apt install -y git
 
