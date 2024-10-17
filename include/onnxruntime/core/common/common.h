@@ -152,7 +152,7 @@ void LogRuntimeError(uint32_t session_id, const common::Status& status, const ch
 
 #define ORT_TRY try
 #define ORT_CATCH(x) catch (x)
-#define ORT_RETHROW throw;
+#define ORT_RETHROW throw
 
 #define ORT_HANDLE_EXCEPTION(func) func()
 

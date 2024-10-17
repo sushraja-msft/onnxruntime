@@ -3,10 +3,12 @@ FROM ubuntu:22.04
 
 ARG ROCM_VERSION=6.2
 ARG AMDGPU_VERSION=${ROCM_VERSION}
+ARG USE_MIGRAPHX=0
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
+ENV MIGRAPHX_DISABLE_FAST_GELU=1
 
 RUN echo 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' > /etc/apt/preferences.d/rocm-pin-600
 
@@ -33,11 +35,12 @@ RUN apt-get update && \
 
 RUN locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8
 
-# Add ROCm repository and install ROCm
+# Add ROCm repository and install ROCm and optional MIGraphX
 RUN curl -sL https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add - && \
     echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/$ROCM_VERSION/ jammy main" | tee /etc/apt/sources.list.d/rocm.list && \
     echo "deb [arch=amd64] https://repo.radeon.com/amdgpu/$AMDGPU_VERSION/ubuntu jammy main" | tee /etc/apt/sources.list.d/amdgpu.list && \
-    apt-get update && apt-get install -y rocm-dev rocm-libs && apt-get clean && rm -rf /var/lib/apt/lists/*
+    migraphx=$( [ "$USE_MIGRAPHX" -eq 1 ] && echo "migraphx" || echo "" ) && \
+    apt-get update && apt-get install -y rocm-dev rocm-libs $migraphx && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install CMake
 ENV CMAKE_VERSION=3.30.5
