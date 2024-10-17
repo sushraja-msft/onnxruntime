@@ -47,7 +47,7 @@ RUN curl -sL https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add - && \
 # Install CMake
 ENV CMAKE_VERSION=3.30.5
 RUN wget -q https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz && \
-    tar -zxf cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz --strip-components=1 -C /usr/local && \
+    tar -zxf cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz --strip-components=1 -C /usr && \
     rm cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
 
 # Install ccache
