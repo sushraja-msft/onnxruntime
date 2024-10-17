@@ -3,15 +3,12 @@ FROM ubuntu:22.04
 
 ARG ROCM_VERSION=6.2
 ARG AMDGPU_VERSION=${ROCM_VERSION}
-ARG APT_PREF='Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600'
-
-CMD ["/bin/bash"]
-
-RUN echo "$APT_PREF" > /etc/apt/preferences.d/rocm-pin-600
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LC_ALL=C.UTF-8
 ENV LANG=C.UTF-8
+
+RUN echo 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' > /etc/apt/preferences.d/rocm-pin-600
 
 # Install necessary system dependencies
 RUN apt-get update && \
@@ -32,17 +29,15 @@ RUN apt-get update && \
     python3.10-venv \
     build-essential \
     locales \
-    git \
-    && apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    git
 
 RUN locale-gen en_US.UTF-8 && update-locale LANG=en_US.UTF-8
 
-# Add ROCm repository
+# Add ROCm repository and install ROCm
 RUN curl -sL https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add - && \
     echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/$ROCM_VERSION/ jammy main" | tee /etc/apt/sources.list.d/rocm.list && \
     echo "deb [arch=amd64] https://repo.radeon.com/amdgpu/$AMDGPU_VERSION/ubuntu jammy main" | tee /etc/apt/sources.list.d/amdgpu.list && \
-    apt-get update && apt-get install -y rocm-dev rocm-libs && apt-get clean
+    apt-get update && apt-get install -y rocm-dev rocm-libs && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Install CMake
 ENV CMAKE_VERSION=3.30.5
@@ -51,7 +46,7 @@ RUN wget -q https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}
     rm cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
 
 # Install ccache
-ENV CCACHE_VERSION=4.7.4
+ENV CCACHE_VERSION=4.10.2
 RUN wget -q https://github.com/ccache/ccache/releases/download/v${CCACHE_VERSION}/ccache-${CCACHE_VERSION}-linux-x86_64.tar.xz && \
     tar -xf ccache-${CCACHE_VERSION}-linux-x86_64.tar.xz && \
     cp ccache-${CCACHE_VERSION}-linux-x86_64/ccache /usr/bin && \
@@ -59,9 +54,7 @@ RUN wget -q https://github.com/ccache/ccache/releases/download/v${CCACHE_VERSION
 
 # Set up virtual environment for Python and install dependencies
 WORKDIR /ort
-
 COPY scripts/requirements.txt /ort/
-
 RUN python3 -m venv /ort/env && . /ort/env/bin/activate && \
     pip install --upgrade pip && \
     pip install -r /ort/requirements.txt && \
@@ -76,3 +69,5 @@ RUN git clone https://github.com/ROCm/cupy.git && cd cupy && \
     git submodule update --init && \
     pip install -e . --no-cache-dir -vvvv && \
     cd .. && rm -rf cupy
+
+CMD ["/bin/bash"]
