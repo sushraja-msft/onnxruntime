@@ -51,16 +51,21 @@ RUN wget -q https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}
     rm cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
 
 # Install ccache
-RUN wget -q https://github.com/ccache/ccache/releases/download/v4.7.4/ccache-4.7.4-linux-x86_64.tar.xz && \
-    tar -xf ccache-4.7.4-linux-x86_64.tar.xz && \
-    cp ccache-4.7.4-linux-x86_64/ccache /usr/bin && \
-    rm -rf ccache-4.7.4-linux-x86_64*
+ENV CCACHE_VERSION=4.7.4
+RUN wget -q https://github.com/ccache/ccache/releases/download/v${CCACHE_VERSION}/ccache-${CCACHE_VERSION}-linux-x86_64.tar.xz && \
+    tar -xf ccache-${CCACHE_VERSION}-linux-x86_64.tar.xz && \
+    cp ccache-${CCACHE_VERSION}-linux-x86_64/ccache /usr/bin && \
+    rm -rf ccache-${CCACHE_VERSION}-linux-x86_64*
 
 # Set up virtual environment for Python and install dependencies
 WORKDIR /ort
+
+COPY scripts/requirements.txt /ort/
+
 RUN python3 -m venv /ort/env && . /ort/env/bin/activate && \
     pip install --upgrade pip && \
-    pip install packaging setuptools numpy==2.1.2 wheel onnx==1.16.1 protobuf==4.21.12 sympy==1.12 flatbuffers psutil ml_dtypes==0.3.0 pytest pytest-xdist pytest-rerunfailures scipy
+    pip install -r /ort/requirements.txt && \
+    pip install psutil ml_dtypes==0.3.0 pytest-xdist pytest-rerunfailures scipy
 
 # Clone and install CuPy with ROCm support
 RUN git clone https://github.com/ROCm/cupy.git && cd cupy && \
