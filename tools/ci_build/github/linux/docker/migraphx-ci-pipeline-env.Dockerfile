@@ -44,18 +44,18 @@ ENV LANG C.UTF-8
 
 WORKDIR /stage
 
-# Cmake
-ENV CMAKE_VERSION=3.30.1
-RUN cd /usr/local && \
-    wget -q https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-Linux-x86_64.tar.gz && \
-    tar -zxf /usr/local/cmake-3.30.1-Linux-x86_64.tar.gz --strip=1 -C /usr
+# Install CMake
+ENV CMAKE_VERSION=3.30.5
+RUN wget -q https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz && \
+    tar -zxf cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz --strip-components=1 -C /usr && \
+    rm cmake-${CMAKE_VERSION}-linux-x86_64.tar.gz
 
-# ccache
-RUN mkdir -p /tmp/ccache && \
-    cd /tmp/ccache && \
-    wget -q -O - https://github.com/ccache/ccache/releases/download/v4.7.4/ccache-4.7.4-linux-x86_64.tar.xz | tar --strip 1 -J -xf - && \
-    cp /tmp/ccache/ccache /usr/bin && \
-    rm -rf /tmp/ccache
+# Install ccache
+ENV CCACHE_VERSION=4.7.4
+RUN wget -q https://github.com/ccache/ccache/releases/download/v${CCACHE_VERSION}/ccache-${CCACHE_VERSION}-linux-x86_64.tar.xz && \
+    tar -xf ccache-${CCACHE_VERSION}-linux-x86_64.tar.xz && \
+    cp ccache-${CCACHE_VERSION}-linux-x86_64/ccache /usr/bin && \
+    rm -rf ccache-${CCACHE_VERSION}-linux-x86_64*
 
 # Install Conda
 ENV PATH /opt/miniconda/bin:${PATH}
@@ -80,4 +80,4 @@ RUN ln -sf /usr/lib/x86_64-linux-gnu/libstdc++.so.6 ${CONDA_ENVIRONMENT_PATH}/bi
 # Install migraphx
 RUN apt update && apt install -y migraphx
 
-RUN pip install numpy packaging ml_dtypes==0.3.0
+RUN pip install numpy packaging ml_dtypes

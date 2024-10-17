@@ -65,7 +65,7 @@ COPY scripts/requirements.txt /ort/
 RUN python3 -m venv /ort/env && . /ort/env/bin/activate && \
     pip install --upgrade pip && \
     pip install -r /ort/requirements.txt && \
-    pip install psutil ml_dtypes==0.3.0 pytest-xdist pytest-rerunfailures scipy
+    pip install psutil ml_dtypes pytest-xdist pytest-rerunfailures scipy
 
 # Clone and install CuPy with ROCm support
 RUN git clone https://github.com/ROCm/cupy.git && cd cupy && \
