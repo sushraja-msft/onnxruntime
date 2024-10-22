@@ -4,6 +4,7 @@ FROM ubuntu:22.04
 ARG ROCM_VERSION=6.1.3
 ARG AMDGPU_VERSION=${ROCM_VERSION}
 ARG APT_PREF='Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600'
+ARG PYTHON_VERSION=3.10
 
 CMD ["/bin/bash"]
 
@@ -21,10 +22,14 @@ RUN apt-get update && \
     libelf1 \
     kmod \
     file \
+    libstdc++6 \
     python3 \
     python3-pip \
+    python${PYTHON_VERSION}-dev \
+    python${PYTHON_VERSION}-venv \
     rocm-dev \
     rocm-libs \
+    git \
     build-essential && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
@@ -56,38 +61,16 @@ RUN mkdir -p /tmp/ccache && \
     cp /tmp/ccache/ccache /usr/bin && \
     rm -rf /tmp/ccache
 
-# Install Conda
-ENV PATH /opt/miniconda/bin:${PATH}
-RUN wget --quiet https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O ~/miniconda.sh --no-check-certificate && /bin/bash ~/miniconda.sh -b -p /opt/miniconda && \
-    conda init bash && \
-    conda config --set auto_activate_base false && \
-    conda update --all && \
-    rm ~/miniconda.sh && conda clean -ya
+# Set up virtual environment for Python and install dependencies
+WORKDIR /ort
+COPY scripts/requirements.txt /ort/
+RUN python3 -m venv /ort/env && . /ort/env/bin/activate && \
+    pip install --upgrade pip && \
+    pip install -r /ort/requirements.txt && \
+    pip install psutil ml_dtypes pytest-xdist pytest-rerunfailures scipy numpy==1.26.4
 
-# Create rocm-ci environment
-ENV CONDA_ENVIRONMENT_PATH /opt/miniconda/envs/rocm-ci
-ENV CONDA_DEFAULT_ENV rocm-ci
-RUN conda create -y -n ${CONDA_DEFAULT_ENV} python=3.10
-ENV PATH ${CONDA_ENVIRONMENT_PATH}/bin:${PATH}
-
-# Enable rocm-ci environment
-SHELL ["conda", "run", "-n", "rocm-ci", "/bin/bash", "-c"]
-
-# Some DLLs in the conda environment have conflict with the one installed in Ubuntu system.
-# For example, the GCC version in the conda environment is 12.x, while the one in the Ubuntu 22.04 is 11.x.
-# ln -sf to make sure we always use libstdc++.so.6 and libgcc_s.so.1 in the system.
-RUN ln -sf /usr/lib/x86_64-linux-gnu/libstdc++.so.6 ${CONDA_ENVIRONMENT_PATH}/bin/../lib/libstdc++.so.6
-RUN ln -sf /usr/lib/x86_64-linux-gnu/libgcc_s.so.1 ${CONDA_ENVIRONMENT_PATH}/bin/../lib/libgcc_s.so.1
-
-RUN pip install packaging \
-                ml_dtypes==0.5.0 \
-                pytest==7.4.4 \
-                pytest-xdist \
-                pytest-rerunfailures \
-                scipy==1.14.1 \
-                numpy==1.26.4
-
-RUN apt install -y git
+ENV LD_LIBRARY_PATH=/opt/rocm/lib:/usr/lib/x86_64-linux-gnu
+ENV PATH=/opt/rocm/bin:/usr/bin:/bin:/usr/sbin:/usr/local/bin
 
 # Install Cupy to decrease CPU utilization
 # Note that the version of Cupy requires numpy < 1.27
@@ -97,4 +80,5 @@ RUN git clone https://github.com/ROCm/cupy && cd cupy && \
     export ROCM_HOME=/opt/rocm && \
     export HCC_AMDGPU_TARGET=gfx906,gfx908,gfx90a && \
     git submodule update --init && \
+    . /ort/env/bin/activate; \
     pip install -e . --no-cache-dir -vvvv
