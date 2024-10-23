@@ -22,7 +22,6 @@ RUN apt-get update && \
     libelf1 \
     kmod \
     file \
-    libstdc++6 \
     python3 \
     python3-pip \
     python${PYTHON_VERSION}-dev \
@@ -75,7 +74,7 @@ ENV PATH=/opt/rocm/bin:/usr/bin:/bin:/usr/sbin:/usr/local/bin
 # Install Cupy to decrease CPU utilization
 # Note that the version of Cupy requires numpy < 1.27
 RUN git clone https://github.com/ROCm/cupy && cd cupy && \
-    git checkout 432a8683351d681e00903640489cb2f4055d2e09 && \
+    git checkout 2f5409233679582df9f917c75714f129574efc2c && \
     export CUPY_INSTALL_USE_HIP=1 && \
     export ROCM_HOME=/opt/rocm && \
     export HCC_AMDGPU_TARGET=gfx906,gfx908,gfx90a && \
