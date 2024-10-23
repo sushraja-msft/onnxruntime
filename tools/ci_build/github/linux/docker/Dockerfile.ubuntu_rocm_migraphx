@@ -74,10 +74,11 @@ ENV LD_LIBRARY_PATH=/opt/rocm/lib:/usr/lib/x86_64-linux-gnu
 ENV PATH=/opt/rocm/bin:/usr/bin:/bin:/usr/sbin:/usr/local/bin
 
 # Clone and install CuPy with ROCm support
+# Note that cupy will install numpy 1.26.4.
 RUN if [ "$USE_CUPY" = "1" ]; then \
       git clone https://github.com/ROCm/cupy.git; \
       cd cupy; \
-      git checkout 432a8683351d681e00903640489cb2f4055d2e09; \
+      git checkout 2f5409233679582df9f917c75714f129574efc2c; \
       export CUPY_INSTALL_USE_HIP=1; \
       export ROCM_HOME=/opt/rocm && \
       export HCC_AMDGPU_TARGET="${AMDGPU_TARGETS}"; \
