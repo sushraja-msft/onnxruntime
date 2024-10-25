@@ -18,12 +18,13 @@ namespace qnn {
 class QnnModelWrapper;
 
 /// <summary>
-/// Represents a fusion of a Reshape->Gemm->Reshape sequence to a single Gemm node.
+/// Represents a fusion of a Reshape->Gemm sequence to a single Gemm node.
+/// Ideally Reshape->Gemm->Reshape should be fused to a single Gemm node with keep_dims set to True,
+/// but some devices may not support setting keep_dims to True, so we still need to keep the 2nd Reshape node.
 /// </summary>
 class ReshapeGemmFusion : public IQnnNodeGroup {
  public:
-  ReshapeGemmFusion(const NodeUnit& input_reshape_node_unit, const NodeUnit& gemm_node_unit,
-                    const NodeUnit& output_reshape_node_unit);
+  ReshapeGemmFusion(const NodeUnit& reshape_node_unit, const NodeUnit& gemm_node_unit);
   ORT_DISALLOW_COPY_AND_ASSIGNMENT(ReshapeGemmFusion);
 
   Status IsSupported(QnnModelWrapper& qmw, const logging::Logger& logger) const override;
@@ -39,7 +40,7 @@ class ReshapeGemmFusion : public IQnnNodeGroup {
       const logging::Logger& logger);
 
  private:
-  std::array<const NodeUnit*, 3> node_units_;
+  std::array<const NodeUnit*, 2> node_units_;
 };
 
 }  // namespace qnn

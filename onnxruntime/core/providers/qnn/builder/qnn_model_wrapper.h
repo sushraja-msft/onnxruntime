@@ -10,11 +10,11 @@
 #include "core/common/status.h"
 #include "QnnInterface.h"
 #include "core/providers/qnn/builder/qnn_def.h"
-#include "core/providers/qnn/builder/qnn_utils.h"
 #include "core/common/logging/logging.h"
 #include "core/framework/node_unit.h"
 #include "core/graph/graph_viewer.h"
 #include "core/providers/shared/utils/utils.h"
+#include "core/providers/qnn/builder/qnn_json_graph.h"
 #include "core/providers/qnn/builder/qnn_quant_params_wrapper.h"
 
 namespace onnxruntime {
@@ -275,7 +275,7 @@ class QnnModelWrapper {
   const Qnn_BackendHandle_t& backend_handle_;
   Qnn_GraphHandle_t graph_ = nullptr;
   std::string graph_name_ = "";
-  utils::QnnJSONGraph debug_json_graph_;
+  QnnJSONGraph debug_json_graph_;
 
   std::vector<std::string> model_input_names_;
   std::vector<std::string> model_output_names_;

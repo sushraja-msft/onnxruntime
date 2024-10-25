@@ -10,11 +10,10 @@
 #include <unordered_set>
 
 #include "gsl/span"
-#include "nlohmann/json.hpp"
 #include "QnnTypes.h"
-#include "core/session/onnxruntime_cxx_api.h"
 #include "core/framework/node_unit.h"
 #include "core/util/qmath.h"
+#include "core/providers/qnn/builder/qnn_model_wrapper.h"
 
 namespace onnxruntime {
 namespace qnn {
@@ -24,40 +23,6 @@ namespace utils {
 size_t GetElementSizeByType(const Qnn_DataType_t& data_type);
 
 size_t GetElementSizeByType(ONNXTensorElementDataType elem_type);
-
-// Class that allows building a JSON representation of a QNN graph.
-// The JSON graph is built in a format that can be loaded with Qualcomm's QNN Netron visualizer.
-class QnnJSONGraph {
- public:
-  QnnJSONGraph();
-
-  /**
-   * Add QNN operator to JSON graph.
-   *
-   * /param op_conf_wrapper QNN operator to add.
-   */
-  void AddOp(const QnnOpConfigWrapper& op_conf_wrapper);
-
-  /**
-   * Finalizes JSON graph (i.e., adds top-level graph metadata) and returns a reference
-   * to the JSON object.
-   *
-   * /return A const reference to the finalized JSON graph object.
-   */
-  const nlohmann::json& Finalize();
-
- private:
-  void AddOpTensors(gsl::span<const Qnn_Tensor_t> tensors);
-
-  nlohmann::json json_;
-  std::unordered_set<std::string> seen_tensors_;   // Tracks tensors already added to JSON graph.
-  std::unordered_set<std::string> seen_op_types_;  // Tracks unique operator types.
-};
-
-// TODO: make these work with Wrappers?
-std::ostream& operator<<(std::ostream& out, const Qnn_Param_t& qnn_param);
-std::ostream& operator<<(std::ostream& out, const Qnn_Tensor_t& tensor);
-std::ostream& operator<<(std::ostream& out, const QnnOpConfigWrapper& op_conf_wrapper);
 
 Status GetQnnDataType(const bool is_quantized_tensor, const ONNX_NAMESPACE::TypeProto* type_proto,
                       Qnn_DataType_t& tensor_data_type);
@@ -135,6 +100,25 @@ Status Quantize(const double double_value,
                 const int32_t zero_point,
                 const Qnn_DataType_t qnn_data_type,
                 int& quant_value);
+
+// Shape and transpose related functions.
+// NCHW shape to channel last
+Status NchwShapeToNhwc(const std::vector<uint32_t>& nchw_shape, std::vector<uint32_t>& nhwc_shape);
+
+// NCHW shape to HWCN shape, required for Conv weight
+Status NchwShapeToHwcn(const std::vector<uint32_t>& nchw_shape, std::vector<uint32_t>& hwcn_shape);
+
+// CNHW shape to HWCN shape, required for Conv weight
+Status CnhwShapeToHwcn(const std::vector<uint32_t>& cnhw_shape, std::vector<uint32_t>& hwcn_shape);
+
+Status TransposeFromNchwToHwcn(const QnnModelWrapper& qnn_model_wrapper, const onnx::TensorProto& initializer,
+                               std::vector<uint8_t>& transposed_data, bool is_3d = false);
+
+Status TransposeFromCnhwToHwcn(const QnnModelWrapper& qnn_model_wrapper, const onnx::TensorProto& initializer,
+                               std::vector<uint8_t>& transposed_data, bool is_3d = false);
+
+Status TwoDimensionTranspose(const QnnModelWrapper& qnn_model_wrapper, std::vector<uint32_t>& data_shape,
+                             const onnx::TensorProto& initializer, std::vector<uint8_t>& transposed_data);
 
 }  // namespace utils
 }  // namespace qnn
