@@ -27,6 +27,7 @@ class ReshapeFusion : public GraphTransformer {
   static bool Is_One_Element_Input(const Node& cur_node, int index);
   static bool Is_One_Element_Output_Subgraph(Graph& graph, const NodeArg& root_input, const Node& concat,
                                              int index, gsl::span<const int64_t> shape_value, const logging::Logger& logger);
+  static bool FuseContiguousReshapes(Node& reshape, Graph& graph, const logging::Logger& logger);
 };
 
 }  // namespace onnxruntime

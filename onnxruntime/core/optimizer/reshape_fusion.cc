@@ -48,6 +48,8 @@ Status ReshapeFusion::ApplyImpl(Graph& graph, bool& modified, int graph_level, c
       fused_count++;
       LOGS(logger, INFO) << "Fused reshape node: " << reshape.OutputDefs()[0]->Name();
       modified = true;
+    } else if (ReshapeFusion::FuseContiguousReshapes(reshape, graph, logger)) {
+      modified = true;
     }
   }
 
@@ -449,6 +451,67 @@ bool ReshapeFusion::Fuse_Subgraph(Node& reshape, Graph& graph, const logging::Lo
   if (!graph_utils::ReplaceNodeWithInitializer(graph, *graph.GetNode(concat.Index()), new_node_arg)) {
     return false;
   }
+  return true;
+}
+
+bool ReshapeFusion::FuseContiguousReshapes(Node& reshape, Graph& graph, const logging::Logger& logger) {
+  ORT_UNUSED_PARAMETER(logger);
+  InlinedVector<Node*> contiguous_reshapes{&reshape};
+  InlinedVector<int64_t> shape_value;
+  while (true) {
+    Node* p_curr_node = contiguous_reshapes.back();
+    if (graph.NodeProducesGraphOutput(*p_curr_node) || p_curr_node->GetOutputEdgesCount() != 1) {
+      break;
+    }
+
+    Node* p_next_node = graph.GetNode(p_curr_node->OutputNodesBegin()->Index());
+    if (p_next_node->OpType() != "Reshape" && p_next_node->OpType() != "Squeeze" &&
+        p_next_node->OpType() != "Unsqueeze") {
+      break;
+    }
+
+    auto shape = p_next_node->OutputDefs()[0]->Shape();
+    if (!shape) {
+      break;
+    }
+
+    bool is_concrete_shape = true;
+    shape_value.clear();
+    for (const auto& dim : shape->dim()) {
+      if (dim.has_dim_value()) {
+        shape_value.push_back(dim.dim_value());
+      } else {
+        is_concrete_shape = false;
+      }
+    }
+    if (!is_concrete_shape) {
+      break;
+    }
+
+    contiguous_reshapes.emplace_back(p_next_node);
+  }
+
+  if (contiguous_reshapes.size() < 2) {
+    return false;
+  }
+
+  const std::string& name = contiguous_reshapes[0]->Name();
+  ONNX_NAMESPACE::TensorProto shape_initializer_proto;
+  shape_initializer_proto.set_name(graph.GenerateNodeName(name + "_new_shape"));
+  shape_initializer_proto.add_dims(static_cast<int64_t>(shape_value.size()));
+  shape_initializer_proto.set_data_type(ONNX_NAMESPACE::TensorProto_DataType_INT64);
+  shape_initializer_proto.set_raw_data(shape_value.data(), shape_value.size() * sizeof(int64_t));
+  NodeArg* shape_arg = &graph_utils::AddInitializer(graph, shape_initializer_proto);
+  Node& reshape_node = graph.AddNode(graph.GenerateNodeName(name + "_new_reshape"), "Reshape", "Reshape for " + name,
+                                     {contiguous_reshapes[0]->MutableInputDefs()[0], shape_arg},
+                                     {contiguous_reshapes.back()->MutableOutputDefs()[0]});
+  reshape_node.SetExecutionProviderType(contiguous_reshapes[0]->GetExecutionProviderType());
+
+  for (Node* p_node : contiguous_reshapes) {
+    graph_utils::RemoveNodeOutputEdges(graph, *p_node);
+    graph.RemoveNode(p_node->Index());
+  }
+
   return true;
 }
 
