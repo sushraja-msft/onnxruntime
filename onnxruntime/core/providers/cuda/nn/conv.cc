@@ -456,8 +456,6 @@ Status Conv<T, Layout>::UpdateState_v9(OpKernelContext* context, bool bias_expec
 
 template <typename T, bool Layout>
 Status Conv<T, Layout>::ComputeInternal_v9(OpKernelContext* context) const {
-  std::lock_guard<std::mutex> lock(s_.mutex);
-
   ORT_RETURN_IF_ERROR(UpdateState_v9(context));
   if (s_.Y->Shape().Size() == 0) {
     return Status::OK();
@@ -507,6 +505,8 @@ Status Conv<T, Layout>::ComputeInternal_v9(OpKernelContext* context) const {
 
 template <typename T, bool Layout>
 Status Conv<T, Layout>::ComputeInternal(OpKernelContext* context) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+
   if (!use_v9_) {
     return ComputeInternal_v8(context);
   }
@@ -527,6 +527,7 @@ Status Conv<T, Layout>::ComputeInternal(OpKernelContext* context) const {
 
 template <typename T, bool Layout>
 Status Conv<T, Layout>::ComputeInternal(OpKernelContext* context) const {
+  std::lock_guard<std::mutex> lock(mutex_);
   return ComputeInternal_v8(context);
 }
 

@@ -131,49 +131,38 @@ class lru_unordered_map {
 // cached cudnn descriptors
 constexpr size_t MAX_CACHED_ALGO_PERF_RESULTS = 10000;
 
-template <typename AlgoPerfType>
-struct CudnnConvState {
+struct CudnnConvStateBase {
   // if x/w dims changed, update algo and cudnnTensors
   TensorShape last_x_dims;
   TensorShape last_w_dims;
 
   // these would be recomputed if x/w dims change
   TensorShape y_dims;
-  TensorShapeVector y_dims_with_adjusted_pads;
   size_t workspace_bytes;
-  decltype(AlgoPerfType().algo) algo;
-  CudnnTensor x_tensor;
   const void* x_data = nullptr;
   size_t element_size = 0;
-  CudnnFilterDescriptor w_desc;
   const void* w_data = nullptr;
   CudnnTensor b_tensor;
   const void* b_data = nullptr;
-  void* b_zero = nullptr;
   CudnnTensor y_tensor;
   Tensor* Y = nullptr;
   void* y_data = nullptr;
   CudnnTensor z_tensor;
   const void* z_data = nullptr;
+};
+
+template <typename AlgoPerfType>
+struct CudnnConvState_v8 : public CudnnConvStateBase {
+  TensorShapeVector y_dims_with_adjusted_pads;
+
+  decltype(AlgoPerfType().algo) algo;
+  CudnnTensor x_tensor;
+
+  CudnnFilterDescriptor w_desc;
+
+  void* b_zero = nullptr;
+
   CudnnConvolutionDescriptor conv_desc;
-  bool bias_fused = true;
-  bool act_fused = true;
-
-#if !defined(__CUDACC__)
-  std::unique_ptr<cudnn_frontend::graph::Graph> cudnn_fe_graph;
-  std::unique_ptr<cudnn_frontend::graph::Graph> cudnn_fe_bias_graph;
-  std::shared_ptr<cudnn_frontend::graph::Tensor_attributes> cudnn_fe_X;
-  std::shared_ptr<cudnn_frontend::graph::Tensor_attributes> cudnn_fe_W;
-  std::shared_ptr<cudnn_frontend::graph::Tensor_attributes> cudnn_fe_conv_Y;
-  std::shared_ptr<cudnn_frontend::graph::Tensor_attributes> cudnn_fe_Z;
-  std::shared_ptr<cudnn_frontend::graph::Tensor_attributes> cudnn_fe_B;
-  std::shared_ptr<cudnn_frontend::graph::Tensor_attributes> cudnn_fe_Y;
-
-  std::optional<cudnn_frontend::graph::Pointwise_attributes> cudnn_fe_act_attr = std::nullopt;
-
-  std::unordered_map<std::shared_ptr<cudnn_frontend::graph::Tensor_attributes>, void*> variant_pack;
-  std::unordered_map<std::shared_ptr<cudnn_frontend::graph::Tensor_attributes>, void*> variant_pack_bias;
-#endif
 
   struct PerfResultParams {
     decltype(AlgoPerfType().algo) algo;
@@ -190,15 +179,58 @@ struct CudnnConvState {
   TensorShapeVector slice_axes;
 
   // note that conv objects are shared between execution frames, and a lock is needed to avoid multi-thread racing
-  std::mutex mutex;
   IAllocatorUniquePtr<void> memory_for_cudnn_conv_results;
 
-  ~CudnnConvState() {
+  ~CudnnConvState_v8() {
     if (b_zero) {
       CUDA_CALL_THROW(cudaFree(b_zero));
       b_zero = nullptr;
     }
   }
+};
+
+struct CudnnConvState_v9 : public CudnnConvStateBase {
+#if !defined(__CUDACC__)
+  std::unique_ptr<cudnn_frontend::graph::Graph> cudnn_fe_graph;
+  std::unique_ptr<cudnn_frontend::graph::Graph> cudnn_fe_bias_graph;
+  std::shared_ptr<cudnn_frontend::graph::Tensor_attributes> cudnn_fe_X;
+  std::shared_ptr<cudnn_frontend::graph::Tensor_attributes> cudnn_fe_W;
+  std::shared_ptr<cudnn_frontend::graph::Tensor_attributes> cudnn_fe_conv_Y;
+  std::shared_ptr<cudnn_frontend::graph::Tensor_attributes> cudnn_fe_Z;
+  std::shared_ptr<cudnn_frontend::graph::Tensor_attributes> cudnn_fe_B;
+  std::shared_ptr<cudnn_frontend::graph::Tensor_attributes> cudnn_fe_Y;
+
+  std::optional<cudnn_frontend::graph::Pointwise_attributes> cudnn_fe_act_attr = std::nullopt;
+
+  std::unordered_map<std::shared_ptr<cudnn_frontend::graph::Tensor_attributes>, void*> variant_pack;
+  std::unordered_map<std::shared_ptr<cudnn_frontend::graph::Tensor_attributes>, void*> variant_pack_bias;
+#endif
+
+  bool bias_fused = true;
+  bool act_fused = true;
+};
+
+template <typename AlgoPerfType>
+struct CudnnConvState : public CudnnConvState_v8<AlgoPerfType> {
+#if !defined(__CUDACC__)
+  std::unique_ptr<cudnn_frontend::graph::Graph> cudnn_fe_graph;
+  std::unique_ptr<cudnn_frontend::graph::Graph> cudnn_fe_bias_graph;
+  std::shared_ptr<cudnn_frontend::graph::Tensor_attributes> cudnn_fe_X;
+  std::shared_ptr<cudnn_frontend::graph::Tensor_attributes> cudnn_fe_W;
+  std::shared_ptr<cudnn_frontend::graph::Tensor_attributes> cudnn_fe_conv_Y;
+  std::shared_ptr<cudnn_frontend::graph::Tensor_attributes> cudnn_fe_Z;
+  std::shared_ptr<cudnn_frontend::graph::Tensor_attributes> cudnn_fe_B;
+  std::shared_ptr<cudnn_frontend::graph::Tensor_attributes> cudnn_fe_Y;
+
+  std::optional<cudnn_frontend::graph::Pointwise_attributes> cudnn_fe_act_attr = std::nullopt;
+
+  std::unordered_map<std::shared_ptr<cudnn_frontend::graph::Tensor_attributes>, void*> variant_pack;
+  std::unordered_map<std::shared_ptr<cudnn_frontend::graph::Tensor_attributes>, void*> variant_pack_bias;
+#endif
+
+  bool bias_fused = true;
+  bool act_fused = true;
+  mutable std::mutex mutex;
 };
 
 enum : size_t {
@@ -257,7 +289,11 @@ class Conv : public CudaKernel {
 #endif
 
   ConvAttributes conv_attrs_;
-  mutable CudnnConvState<cudnnConvolutionFwdAlgoPerf_t> s_;
+
+  mutable CudnnConvState_v9 s_;
+  mutable CudnnConvState_v8<cudnnConvolutionFwdAlgoPerf_t> state_v8_;
+  mutable std::mutex mutex_;
+
   constexpr static auto kDefaultConvAlgo = CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_PRECOMP_GEMM;
   std::unique_ptr<Tensor> W_;
   bool is_nhwc_domain_;         // prepack is only needed for the Conv in kMSInternalNHWCDomain
