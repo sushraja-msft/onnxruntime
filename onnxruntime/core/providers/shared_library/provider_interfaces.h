@@ -243,7 +243,8 @@ struct ProviderHost {
 
   // IExecutionProvider
   virtual std::vector<std::unique_ptr<ComputeCapability>> IExecutionProvider__GetCapability(const IExecutionProvider* p, const onnxruntime::GraphViewer& graph_viewer,
-                                                                                            const IExecutionProvider::IKernelLookup& kernel_lookup) = 0;
+                                                                                            const IExecutionProvider::IKernelLookup& kernel_lookup,
+                                                                                            IResourceAccountant* resource_accountant) = 0;
 
   virtual common::Status IExecutionProvider__Compile(IExecutionProvider* p, const std::vector<IExecutionProvider::FusedNodeAndGraph>& fused_nodes_and_graphs, std::vector<NodeComputeInfo>& node_compute_funcs) = 0;
 

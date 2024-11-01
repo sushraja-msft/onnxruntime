@@ -847,6 +847,38 @@ INSTANTIATE_UNPACK_TENSOR(UInt4x2)
     break;
 
 template <size_t alignment>
+common::Status GetSizeInBytesFromTensorShapeAndType(const TensorShape& shape, int32_t element_type, size_t* out) {
+  const auto size = narrow<size_t>(tensor_shape.Size());
+  switch (element_type) {
+    CASE_PROTO_TRACE(FLOAT, float);
+    CASE_PROTO_TRACE(DOUBLE, double);
+    CASE_PROTO_TRACE(BOOL, bool);
+    CASE_PROTO_TRACE(INT8, int8_t);
+    CASE_PROTO_TRACE(INT16, int16_t);
+    CASE_PROTO_TRACE(INT32, int32_t);
+    CASE_PROTO_TRACE(INT64, int64_t);
+    CASE_PROTO_TRACE(UINT8, uint8_t);
+    CASE_PROTO_TRACE(UINT16, uint16_t);
+    CASE_PROTO_TRACE(UINT32, uint32_t);
+    CASE_PROTO_TRACE(UINT64, uint64_t);
+    CASE_PROTO_TRACE(FLOAT16, MLFloat16);
+    CASE_PROTO_TRACE(BFLOAT16, BFloat16);
+    CASE_PROTO_TRACE(STRING, std::string);
+#if !defined(DISABLE_FLOAT8_TYPES)
+    CASE_PROTO_TRACE(FLOAT8E4M3FN, Float8E4M3FN);
+    CASE_PROTO_TRACE(FLOAT8E4M3FNUZ, Float8E4M3FNUZ);
+    CASE_PROTO_TRACE(FLOAT8E5M2, Float8E5M2);
+    CASE_PROTO_TRACE(FLOAT8E5M2FNUZ, Float8E5M2FNUZ);
+#endif
+    CASE_PROTO_TRACE_INT4(UINT4, UInt4x2);
+    CASE_PROTO_TRACE_INT4(INT4, Int4x2);
+    default:
+      return common::Status(common::ONNXRUNTIME, common::NOT_IMPLEMENTED);
+  }
+  return Status::OK();
+}
+
+template <size_t alignment>
 common::Status GetSizeInBytesFromTensorProto(const ONNX_NAMESPACE::TensorProto& tensor_proto, size_t* out) {
   const auto& dims = tensor_proto.dims();
   size_t size = 1;
@@ -887,24 +919,34 @@ common::Status GetSizeInBytesFromTensorProto(const ONNX_NAMESPACE::TensorProto& 
   return Status::OK();
 }
 
+template<size_t alignment>
+common::Status GetSizeInBytesFromTensorTypeProto(const ONNX_NAMESPACE::TypeProto_Tensor& tensor_proto, size_t* out) {
+
+  ORT_RETURN_IF_NOT(HasShape(tensor_proto));
+  ORT_RETURN_IF_NOT(HasElemType(tensor_proto));
+
+  TensorShape tensor_shape = GetTensorShapeFromTensorShapeProto(tensor_proto.shape());
+  return GetSizeInBytesFromTensorShapeAndType<alignment>(tensor_shape, tensor_proto.elem_type(), out);
+}
+
 TensorShape GetTensorShapeFromTensorShapeProto(const ONNX_NAMESPACE::TensorShapeProto& tensor_shape_proto) {
   const auto& dims = tensor_shape_proto.dim();
-  std::vector<int64_t> tensor_shape_vec(static_cast<size_t>(dims.size()));
+  TensorShapeVector tensor_shape_vec(static_cast<size_t>(dims.size()));
   for (int i = 0; i < dims.size(); ++i) {
     tensor_shape_vec[i] =
         HasDimValue(dims[i]) ? dims[i].dim_value() : -1; /* symbolic dimensions are represented as -1 in onnxruntime*/
   }
-  return TensorShape(std::move(tensor_shape_vec));
+  return TensorShape(tensor_shape_vec);
 }
 
 TensorShape GetTensorShapeFromTensorProto(const ONNX_NAMESPACE::TensorProto& tensor_proto) {
   const auto& dims = tensor_proto.dims();
-  std::vector<int64_t> tensor_shape_vec(static_cast<size_t>(dims.size()));
+  TensorShapeVector tensor_shape_vec(static_cast<size_t>(dims.size()));
   for (int i = 0; i < dims.size(); ++i) {
     tensor_shape_vec[i] = dims[i];
   }
 
-  return TensorShape(std::move(tensor_shape_vec));
+  return TensorShape(tensor_shape_vec);
 }
 
 struct UnInitializeParam {

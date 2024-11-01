@@ -31,6 +31,7 @@ class Node;
 #include "core/framework/func_api.h"
 #include "core/framework/provider_options.h"
 #include "core/framework/framework_provider_common.h"
+#include "core/framework/resource_accountant.h"
 #include "core/framework/stream_handles.h"
 #include "core/framework/tuning_context.h"
 
@@ -130,7 +131,8 @@ class IExecutionProvider {
   */
   virtual std::vector<std::unique_ptr<ComputeCapability>>
   GetCapability(const onnxruntime::GraphViewer& graph_viewer,
-                const IKernelLookup& kernel_lookup) const;
+                const IKernelLookup& kernel_lookup,
+                IResourceAccountant* resource_accountant = nullptr) const;
 
   /**
      Get kernel registry per execution provider type.

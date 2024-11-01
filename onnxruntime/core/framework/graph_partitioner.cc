@@ -5,7 +5,9 @@
 
 #include <cassert>
 #include <functional>
+#include <variant>
 
+#include "core/common/inlined_containers.h"
 #include "core/framework/compute_capability.h"
 #include "core/framework/execution_providers.h"
 #include "core/framework/func_kernel.h"
@@ -48,6 +50,9 @@ NonCudaOps non_cuda;
 namespace onnxruntime {
 
 namespace {
+
+// A map of Ep Type to a resource accountant for this EP
+using ResourceAccountantMap = InlinedHashMap<std::string, std::unique_ptr<IResourceAccountant>>;
 
 // contains some common parameters used by the partitioning helper functions
 struct PartitionParams {
@@ -131,6 +136,7 @@ struct GetCapabilityForEPParams {
   std::reference_wrapper<const layout_transformation::TransformLayoutFunction> transform_layout;
   std::reference_wrapper<const layout_transformation::DebugGraphFn> debug_graph_fn;
 #endif  // !defined(ORT_MINIMAL_BUILD) || defined(ORT_EXTENDED_MINIMAL_BUILD)
+  IResourceAccountant* resource_accountant;
 };
 
 auto get_capabilities = [](const IExecutionProvider& ep,
@@ -359,7 +365,8 @@ static Status PartitionOnnxFormatModelImpl(Graph& graph, FuncManager& func_mgr,
                                            GraphPartitioner::Mode mode,
                                            int& fused_node_unique_id,
                                            const layout_transformation::TransformLayoutFunction& transform_layout_fn,
-                                           const layout_transformation::DebugGraphFn& debug_graph_fn) {
+                                           const layout_transformation::DebugGraphFn& debug_graph_fn,
+                                           IResourceAccountant* resource_accountant) {
   // handle testing edge case where optimizers or constant lifting results in graph with no nodes.
   // doing it here saves all providers checking for this in GetCapability
   if (graph.NumberOfNodes() == 0) {
@@ -373,7 +380,7 @@ static Status PartitionOnnxFormatModelImpl(Graph& graph, FuncManager& func_mgr,
       // we pass through the FuncManager from the top level graph
       ORT_RETURN_IF_ERROR(PartitionOnnxFormatModelImpl(*subgraph, func_mgr, kernel_registry_mgr,
                                                        fused_kernel_registry, current_ep, mode, fused_node_unique_id,
-                                                       transform_layout_fn, debug_graph_fn));
+                                                       transform_layout_fn, debug_graph_fn, resource_accountant));
     }
   }
 
@@ -396,7 +403,8 @@ static Status PartitionOnnxFormatModelImpl(Graph& graph, FuncManager& func_mgr,
       std::ref(capabilities),
       mode,
       std::cref(transform_layout_fn),
-      std::cref(debug_graph_fn)};
+      std::cref(debug_graph_fn),
+      resource_accountant};
 
   ORT_RETURN_IF_ERROR(GetCapabilityForEP(get_capability_params));
   if (capabilities.empty()) {
@@ -727,7 +735,8 @@ static Status CreateEpContextModel(const ExecutionProviders& execution_providers
 
 static Status PartitionOnnxFormatModel(const PartitionParams& partition_params, GraphPartitioner::Mode mode,
                                        const ExecutionProviders& execution_providers,
-                                       KernelRegistryManager& kernel_registry_manager) {
+                                       KernelRegistryManager& kernel_registry_manager,
+                                       const ResourceAccountantMap& acc_map) {
   bool modified_graph = false;
 
   auto& graph = partition_params.graph.get();
@@ -739,10 +748,16 @@ static Status PartitionOnnxFormatModel(const PartitionParams& partition_params, 
   do {
     // process full graph with each EP
     for (const auto& ep : execution_providers) {
+      IResourceAccountant* resource_accountant = nullptr;
+      auto hit = acc_map.find(ep->Type());
+      if (hit != acc_map.end()) {
+        resource_accountant = hit->second.get();
+      }
       ORT_RETURN_IF_ERROR(PartitionOnnxFormatModelImpl(graph, func_mgr, kernel_registry_manager,
                                                        fused_kernel_registry, *ep, mode, fused_node_unique_id,
                                                        transform_layout_function,
-                                                       partition_params.debug_graph_fn));
+                                                       partition_params.debug_graph_fn,
+                                                       resource_accountant));
     }
 
     // expand any nodes that have an ONNX function definition but no matching ORT kernel.
@@ -977,8 +992,23 @@ Status GraphPartitioner::Partition(Graph& graph, FuncManager& func_mgr,
 
   if (mode == Mode::kNormal || mode == Mode::kAssignOnly) {
 #if !defined(ORT_MINIMAL_BUILD)
+
+    // We use this only if Resource Aware Partitioning is enabled for any of the EPs
+    ResourceAccountantMap ep_acc_map;
+    // Zero, it is disabled by default
+    std::string cuda_memory_limit_config = config_options.GetConfigOrDefault(kOrtSessionOptionsConfigSetCudaMemoryLimitInMB, "0");
+    if (cuda_memory_limit_config != "0") {
+      if (cuda_memory_limit_config.empty()) {
+        ep_acc_map[kCudaExecutionProvider] = std::make_unique<MemoryAccountant>();
+      } else {
+        int cuda_memory_limit = std::stoi(cuda_memory_limit_config);
+        ep_acc_map[kCudaExecutionProvider] = std::make_unique<MemoryAccountant>(cuda_memory_limit);
+      }
+    }
+
     ORT_RETURN_IF_ERROR(PartitionOnnxFormatModel(partition_params, mode,
-                                                 providers_, kernel_registry_mgr_));
+                                                 providers_, kernel_registry_mgr_,
+                                                 ep_acc_map));
 
     bool ep_context_enabled = config_options.GetConfigOrDefault(kOrtSessionOptionEpContextEnable, "0") == "1";
     std::string ep_context_path = config_options.GetConfigOrDefault(kOrtSessionOptionEpContextFilePath, "");
