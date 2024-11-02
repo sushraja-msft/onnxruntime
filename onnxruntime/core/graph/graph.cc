@@ -5492,7 +5492,7 @@ Graph::Graph(const Model& owning_model,
       is_loaded_from_model_file_(true) {  // true as the Graph isn't manually constructed from scratch
 }
 
-std::optional<size_t> Graph::ComputeNodeMemoryUsage(NodeIndex node_idx) const {
+size_t Graph::ComputeNodeMemoryUsage(NodeIndex node_idx) const {
   /// XXX: In some cases some kernels can copy its attributes to a device
   // those are edge cases which we currently do not account for.
   const Node* node = GetNode(node_idx);
@@ -5514,6 +5514,10 @@ std::optional<size_t> Graph::ComputeNodeMemoryUsage(NodeIndex node_idx) const {
           if (proto != nullptr && utils::HasTensorType(*proto)) {
             const auto& tensor_type = proto->tensor_type();
             if (utils::HasElemType(tensor_type) && utils::HasShape(tensor_type)) {
+              size_t size;
+              if (utils::GetSizeInBytesFromTensorTypeProto<0>(tensor_type, &size).IsOK()) {
+                result += size;
+              }
             }
           }
         }
@@ -5521,7 +5525,7 @@ std::optional<size_t> Graph::ComputeNodeMemoryUsage(NodeIndex node_idx) const {
     }
     return static_cast<size_t>(result);
   }
-  return {};
+  return 0;
 }
 
 common::Status Graph::LoadFromOrtFormat(const onnxruntime::fbs::Graph& fbs_graph,

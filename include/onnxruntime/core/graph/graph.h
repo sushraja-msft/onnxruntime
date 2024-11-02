@@ -885,7 +885,7 @@ class Graph {  // NOLINT(clang-analyzer-optin.performance.Padding): preserve exi
 
       Returns no value if the node was not found.
   */
-  std::optional<size_t> ComputeNodeMemoryUsage(NodeIndex) const;
+  size_t ComputeNodeMemoryUsage(NodeIndex) const;
 
   /** Gets the maximum NodeIndex value used in the Graph.
   WARNING: This actually returns the max index value used + 1.

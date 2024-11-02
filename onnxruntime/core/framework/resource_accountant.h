@@ -5,7 +5,7 @@
 
 #include <optional>
 #include <variant>
-  
+
 namespace onnxruntime {
 // Common holder for potentially different resource accounting
 // for different EPs
@@ -59,4 +59,3 @@ class MemoryAccountant : public IResourceAccountant {
 };
 
 }  // namespace onnxruntime
-
