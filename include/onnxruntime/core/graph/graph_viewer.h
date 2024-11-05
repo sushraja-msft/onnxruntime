@@ -6,6 +6,7 @@
 #include <filesystem>
 
 #include "core/graph/graph.h"
+#include "core/framework/resource_accountant.h"
 #include "core/framework/session_options.h"
 
 namespace onnxruntime {
@@ -188,6 +189,10 @@ class GraphViewer {
   @returns Filter info or nullptr
   */
   const IndexedSubGraph* GetFilterInfo() const { return filter_info_; }
+
+  size_t ComputeNodeMemoryUsage(NodeIndex node_index) const {
+    return graph_->ComputeNodeMemoryUsage(node_index);
+  }
 
 #if !defined(ORT_MINIMAL_BUILD)
   IOnnxRuntimeOpSchemaCollectionPtr GetSchemaRegistry() const { return graph_->GetSchemaRegistry(); }

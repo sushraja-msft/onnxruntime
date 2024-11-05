@@ -7,6 +7,8 @@
 #include <string>
 #include <vector>
 
+#include "core/common/inlined_containers_fwd.h"
+#include "core/framework/resource_accountant.h"
 #include "core/graph/basic_types.h"
 #include "core/graph/onnx_protobuf.h"
 
@@ -70,9 +72,28 @@ struct IndexedSubGraph {
     return meta_def_.get();
   }
 
+  bool IsAccountingEnabled() const {
+    return resource_accountant != nullptr &&
+           nodes_costs.size() == nodes.size();
+  }
+
+  // Should call IsAccountingEnabled() first
+  void AccountForNode(size_t cost_index) const {
+    assert(cost_index < nodes_costs.size());
+    resource_accountant->AddConsumedAmount(nodes_costs[cost_index]);
+  }
+
+  void ComputeAndAccountForNode(const Graph& graph, size_t node_index) const {
+    assert(IsAccountingEnabled());
+    resource_accountant->AddConsumedAmount(resource_accountant->ComputeResourceCount(graph, node_index));
+  }
+
  private:
   // subgraph meta definition.
   std::unique_ptr<MetaDef> meta_def_;
+  IResourceAccountant* resource_accountant = nullptr;  // Resource accountant for this subgraph.
+  // Vector with resource costs for nodes above. Should have the same size
+  InlinedVector<ResourceCount> nodes_costs;
 };
 
 }  // namespace onnxruntime

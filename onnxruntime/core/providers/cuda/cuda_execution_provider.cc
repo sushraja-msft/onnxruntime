@@ -5,6 +5,7 @@
 #include "core/common/inlined_containers.h"
 #include "core/common/parse_string.h"
 #include "core/framework/int4.h"
+#include "core/framework/resource_accountant.h"
 #include "core/providers/shared_library/provider_api.h"
 #include "core/platform/env_var_utils.h"
 #include "core/providers/cuda/cuda_execution_provider.h"
@@ -2573,7 +2574,33 @@ std::unique_ptr<onnxruntime::IDataTransfer> CUDAExecutionProvider::GetDataTransf
 std::vector<std::unique_ptr<ComputeCapability>>
 CUDAExecutionProvider::GetCapability(const onnxruntime::GraphViewer& graph,
                                      const IKernelLookup& kernel_lookup,
-                                     IResourceAccountant*) const {
+                                     IResourceAccountant* resource_accountant) const {
+  std::vector<std::unique_ptr<ComputeCapability>> result;
+
+  // Figure out the memory limit if accountant is available
+  std::optional<ResourceCount> memory_threshold;
+  SafeInt<size_t> memory_total = 0;
+  if (resource_accountant != nullptr) {
+    memory_threshold = resource_accountant->GetThreshold();
+    if (!memory_threshold.has_value()) {
+      // info_.gpu_mem_limit is for BFC arena
+      size_t free_memory, total_memory;
+      if (0 != cudaMemGetInfo(&free_memory, &total_memory)) {
+        memory_threshold = info_.gpu_mem_limit;
+      } else {
+        memory_threshold = std::min(free_memory, info_.gpu_mem_limit);
+      }
+    }
+
+    memory_total = std::get<0>(resource_accountant->GetConsumedAmount());
+    // Return early if already over the limit
+    if (memory_total > *memory_threshold) {
+      return result;
+    }
+  } else {
+    memory_threshold = std::numeric_limits<size_t>::max();
+  }
+
   InlinedVector<NodeIndex> candidates;
   // A subset of the above vector. A subset of the tentative_nodes might be moved to CPU.
   InlinedVector<NodeIndex> tentative_nodes;
@@ -2638,7 +2665,6 @@ CUDAExecutionProvider::GetCapability(const onnxruntime::GraphViewer& graph,
   // These are usually shape related computation subgraphs
   // Following logic can be extended for other EPs
   auto cpu_nodes = GetCpuPreferredNodes(graph, kernel_lookup, tentative_nodes);
-  std::vector<std::unique_ptr<ComputeCapability>> result;
   for (auto& node_index : candidates) {
     if (cpu_nodes.count(node_index) > 0)
       continue;

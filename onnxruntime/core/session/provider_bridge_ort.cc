@@ -759,6 +759,9 @@ struct ProviderHostImpl : ProviderHost {
   std::unique_ptr<IndexedSubGraph> IndexedSubGraph__construct() override { return std::make_unique<IndexedSubGraph>(); }
   void IndexedSubGraph__operator_delete(IndexedSubGraph* p) override { delete p; }
 
+  const std::vector<onnxruntime::NodeIndex>& IndexedSubGraph__Nodes(const IndexedSubGraph* p) override {
+    return p->nodes;
+  }
   std::vector<onnxruntime::NodeIndex>& IndexedSubGraph__Nodes(IndexedSubGraph* p) override { return p->nodes; }
 
   void IndexedSubGraph__SetMetaDef(IndexedSubGraph* p, std::unique_ptr<IndexedSubGraph_MetaDef>&& meta_def_) override { p->SetMetaDef(std::move(meta_def_)); }
@@ -1197,6 +1200,10 @@ struct ProviderHostImpl : ProviderHost {
 #else
     return {};
 #endif
+  }
+
+  size_t GraphViewer__ComputeNodeMemoryUsage(const GraphViewer* p, NodeIndex node_index) override {
+    return p->ComputeNodeMemoryUsage(node_index);
   }
 
   const std::unordered_map<std::string, int>& GraphViewer__DomainToVersionMap(const GraphViewer* p) override { return p->DomainToVersionMap(); }

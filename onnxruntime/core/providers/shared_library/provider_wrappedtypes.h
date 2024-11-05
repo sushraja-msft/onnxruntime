@@ -552,6 +552,7 @@ struct IndexedSubGraph final {
   static std::unique_ptr<IndexedSubGraph> Create() { return g_host->IndexedSubGraph__construct(); }
   static void operator delete(void* p) { g_host->IndexedSubGraph__operator_delete(reinterpret_cast<IndexedSubGraph*>(p)); }
 
+  gsl::span<const onnxruntime::NodeIndex> Nodes() const { return g_host->IndexedSubGraph__Nodes(this); }
   std::vector<onnxruntime::NodeIndex>& Nodes() { return g_host->IndexedSubGraph__Nodes(this); }
 
   void SetMetaDef(std::unique_ptr<IndexedSubGraph_MetaDef>&& meta_def_) { return g_host->IndexedSubGraph__SetMetaDef(this, std::move(*reinterpret_cast<std::unique_ptr<IndexedSubGraph_MetaDef>*>(&meta_def_))); }
@@ -1059,6 +1060,9 @@ class GraphViewer final {
   const std::vector<const NodeArg*>& GetInputsIncludingInitializers() const noexcept { return g_host->GraphViewer__GetInputsIncludingInitializers(this); }
   const std::unordered_set<std::string>& GetOuterScopeNodeArgNames() const noexcept {
     return g_host->GraphViewer__GetOuterScopeNodeArgNames(this);
+  }
+  size_t ComputeNodeMemoryUsage(NodeIndex node_index) const {
+    return g_host->GraphViewer__ComputeNodeMemoryUsage(this, node_index);
   }
 
   void ToProto(ONNX_NAMESPACE::GraphProto& graph_proto,

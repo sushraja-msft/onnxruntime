@@ -7,6 +7,9 @@
 #include <variant>
 
 namespace onnxruntime {
+
+class Graph;
+
 // Common holder for potentially different resource accounting
 // for different EPs
 using ResourceCount = std::variant<size_t>;
@@ -24,7 +27,6 @@ class IResourceAccountant {
  protected:
   IResourceAccountant() = default;
   IResourceAccountant(const ResourceCount& threshold) : threshold_(threshold) {}
-
  public:
   virtual ~IResourceAccountant() = default;
   virtual ResourceCount GetConsumedAmount() const = 0;
@@ -33,7 +35,6 @@ class IResourceAccountant {
   std::optional<ResourceCount> GetThreshold() const {
     return threshold_;
   }
-
  private:
   std::optional<ResourceCount> threshold_;
 };

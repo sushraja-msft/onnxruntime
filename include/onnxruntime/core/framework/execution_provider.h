@@ -31,13 +31,14 @@ class Node;
 #include "core/framework/func_api.h"
 #include "core/framework/provider_options.h"
 #include "core/framework/framework_provider_common.h"
-#include "core/framework/resource_accountant.h"
 #include "core/framework/stream_handles.h"
 #include "core/framework/tuning_context.h"
 
 struct OrtRunOptions;
 
 namespace onnxruntime {
+
+class IResourceAccountant;
 
 /**
    Logical device representation.

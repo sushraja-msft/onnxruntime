@@ -8,6 +8,7 @@
 #include <variant>
 
 #include "core/common/inlined_containers.h"
+#include "core/framework/resource_accountant.h"
 #include "core/framework/compute_capability.h"
 #include "core/framework/execution_providers.h"
 #include "core/framework/func_kernel.h"
@@ -65,6 +66,29 @@ struct PartitionParams {
   std::reference_wrapper<const layout_transformation::DebugGraphFn> debug_graph_fn;
 #endif  // !defined(ORT_MINIMAL_BUILD) || defined(ORT_EXTENDED_MINIMAL_BUILD)
 };
+
+// Use this accountant if your resource can be counted with size_t type
+class SizeTAccountant : public IResourceAccountant {
+ public:
+  SizeTAccountant() = default;
+  ~SizeTAccountant() = default;
+
+  explicit SizeTAccountant(size_t threshold) : IResourceAccountant(threshold) {}
+
+  ResourceCount GetConsumedAmount() const noexcept override {
+    return consumed_amount_;
+  }
+  void AddConsumedAmount(const ResourceCount& amount) noexcept override {
+    consumed_amount_ += std::get<0>(amount);
+  }
+  void RemoveConsumedAmount(const ResourceCount& amount) noexcept override {
+    consumed_amount_ -= std::get<0>(amount);
+  }
+
+ private:
+  size_t consumed_amount_ = 0;
+};
+
 }  // namespace
 
 #if !defined(ORT_MINIMAL_BUILD) || defined(ORT_EXTENDED_MINIMAL_BUILD)
@@ -97,11 +121,14 @@ static bool TryAssignNodes(Graph& graph, const IndexedSubGraph& capability,
     }
   }
 
-  for (auto node_index : capability.nodes) {
-    auto* node = graph.GetNode(node_index);
+  const bool acc_enabled = capability.IsAccountingEnabled();
+  for (size_t i = 0, limit = capability.nodes.size(); i < limit; ++i) {
+    auto* node = graph.GetNode(capability.nodes[i]);
     node->SetExecutionProviderType(provider_type);
+    if (acc_enabled) {
+      capability.AccountForNode(i);
+    }
   }
-
   return true;
 }
 
@@ -118,6 +145,9 @@ static bool TryAssignSingleNode(Graph& graph,
   if (nullptr != node && node->GetExecutionProviderType().empty()) {
     // The node was not fused or assigned. Assign it to <provider_type>.
     node->SetExecutionProviderType(provider_type);
+    if (indexed_sub_graph.IsAccountingEnabled()) {
+      indexed_sub_graph.AccountForNode(0);
+    }
     return true;
   }
 
@@ -321,6 +351,7 @@ static Node* PlaceNode(Graph& graph, const IndexedSubGraph& capability,
     }
 
     if (sub_graph_available_for_assignment) {
+      const bool acc_enabled = capability.IsAccountingEnabled();
       if (mode == GraphPartitioner::Mode::kNormal) {
         std::ostringstream oss;
         oss << provider_type << "_" << capability.GetMetaDef()->name << "_" << fused_node_unique_id++;
@@ -336,6 +367,12 @@ static Node* PlaceNode(Graph& graph, const IndexedSubGraph& capability,
         }
 
         fused_node->SetExecutionProviderType(provider_type);
+        if (acc_enabled) {
+          // We account for the fused node. We operate under assumption
+          // that the fused node would use no more memory when the nodes we are fusing.
+          // and potentially less than that.
+          capability.ComputeAndAccountForNode(graph, fused_node->Index());
+        }
 
         result = fused_node;
       } else {
@@ -343,10 +380,13 @@ static Node* PlaceNode(Graph& graph, const IndexedSubGraph& capability,
         // This is used when exporting an ORT format model to maintain the original nodes and re-do the fusion
         // at runtime. The original nodes provide a fallback if fewer nodes can be fused at runtime due to device
         // capabilities.
-        for (auto node_index : capability.nodes) {
-          auto* node = graph.GetNode(node_index);
+        for (size_t i = 0, limit = capability.nodes.size(); i < limit; ++i) {
+          auto* node = graph.GetNode(capability.nodes[i]);
           if (node != nullptr) {
             node->SetExecutionProviderType(provider_type);
+            if (acc_enabled) {
+              capability.AccountForNode(i);
+            }
           }
         }
       }
@@ -839,6 +879,9 @@ static Status PartitionOrtFormatModelImpl(const PartitionParams& partition_param
 
       Node& fused_node = graph.BeginFuseSubGraph(indexed_sub_graph, node_name);
       fused_node.SetExecutionProviderType(type);
+      if (indexed_sub_graph.IsAccountingEnabled()) {
+        indexed_sub_graph.ComputeAndAccountForNode(graph, fused_node.Index());
+      }
 
       // create filtered graph viewer for this set of nodes
       //
@@ -855,6 +898,7 @@ static Status PartitionOrtFormatModelImpl(const PartitionParams& partition_param
 #if !defined(ORT_MINIMAL_BUILD) || defined(ORT_EXTENDED_MINIMAL_BUILD)
   // We will compile the fused nodes one by one, and fuse the subgraph if successful.
   for (const auto& compilation_entry : compilation_entries) {
+    const bool acc_enabled = compilation_entry.capability.get().sub_graph->IsAccountingEnabled();
     Node& node = compilation_entry.fused_node;
     std::vector<NodeComputeInfo> single_node_compute_func;
     ORT_RETURN_IF_ERROR(current_ep.Compile({IExecutionProvider::FusedNodeAndGraph{node, *compilation_entry.viewer}},
@@ -882,6 +926,9 @@ static Status PartitionOrtFormatModelImpl(const PartitionParams& partition_param
 
     // now that we're done compiling we can remove the original nodes from the Graph and wire in the new one
     graph.FinalizeFuseSubGraph(indexed_sub_graph, node);
+    if (acc_enabled) {
+      compilation_entry.capability.get().sub_graph->ComputeAndAccountForNode(graph, node.Index());
+    }
   }
 #endif  // !defined(ORT_MINIMAL_BUILD) || defined(ORT_EXTENDED_MINIMAL_BUILD)
 
@@ -999,10 +1046,10 @@ Status GraphPartitioner::Partition(Graph& graph, FuncManager& func_mgr,
     std::string cuda_memory_limit_config = config_options.GetConfigOrDefault(kOrtSessionOptionsConfigSetCudaMemoryLimitInMB, "0");
     if (cuda_memory_limit_config != "0") {
       if (cuda_memory_limit_config.empty()) {
-        ep_acc_map[kCudaExecutionProvider] = std::make_unique<MemoryAccountant>();
+        ep_acc_map[kCudaExecutionProvider] = std::make_unique<SizeTAccountant>();
       } else {
         int cuda_memory_limit = std::stoi(cuda_memory_limit_config);
-        ep_acc_map[kCudaExecutionProvider] = std::make_unique<MemoryAccountant>(cuda_memory_limit);
+        ep_acc_map[kCudaExecutionProvider] = std::make_unique<SizeTAccountant>(cuda_memory_limit);
       }
     }
 
