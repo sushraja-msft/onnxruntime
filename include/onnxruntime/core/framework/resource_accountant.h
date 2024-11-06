@@ -7,8 +7,11 @@
 #include <variant>
 
 namespace onnxruntime {
-
+#ifndef SHARED_PROVIDER
 class Graph;
+#else
+struct Graph;
+#endif
 
 // Common holder for potentially different resource accounting
 // for different EPs
@@ -27,14 +30,17 @@ class IResourceAccountant {
  protected:
   IResourceAccountant() = default;
   IResourceAccountant(const ResourceCount& threshold) : threshold_(threshold) {}
+
  public:
   virtual ~IResourceAccountant() = default;
   virtual ResourceCount GetConsumedAmount() const = 0;
   virtual void AddConsumedAmount(const ResourceCount& amount) = 0;
   virtual void RemoveConsumedAmount(const ResourceCount& amount) = 0;
+  virtual ResourceCount ComputeResourceCount(const Graph&, size_t node_index) const = 0;
   std::optional<ResourceCount> GetThreshold() const {
     return threshold_;
   }
+
  private:
   std::optional<ResourceCount> threshold_;
 };

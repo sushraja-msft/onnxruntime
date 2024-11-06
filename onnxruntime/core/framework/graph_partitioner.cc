@@ -85,6 +85,10 @@ class SizeTAccountant : public IResourceAccountant {
     consumed_amount_ -= std::get<0>(amount);
   }
 
+  ResourceCount ComputeResourceCount(const Graph& graph, NodeIndex node_index) const override {
+    return graph.ComputeNodeMemoryUsage(node_index);
+  }
+
  private:
   size_t consumed_amount_ = 0;
 };
@@ -370,7 +374,8 @@ static Node* PlaceNode(Graph& graph, const IndexedSubGraph& capability,
         if (acc_enabled) {
           // We account for the fused node. We operate under assumption
           // that the fused node would use no more memory when the nodes we are fusing.
-          // and potentially less than that.
+          // and potentially less than that, and therefore, no threshold check is needed here.
+          // All threshold checks are done within the EP.
           capability.ComputeAndAccountForNode(graph, fused_node->Index());
         }
 

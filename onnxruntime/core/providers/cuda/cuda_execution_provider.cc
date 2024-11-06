@@ -2578,11 +2578,11 @@ CUDAExecutionProvider::GetCapability(const onnxruntime::GraphViewer& graph,
   std::vector<std::unique_ptr<ComputeCapability>> result;
 
   // Figure out the memory limit if accountant is available
-  std::optional<ResourceCount> memory_threshold;
-  SafeInt<size_t> memory_total = 0;
+  size_t memory_threshold;
+  SafeInt<size_t> consumed_memory = 0;
   if (resource_accountant != nullptr) {
-    memory_threshold = resource_accountant->GetThreshold();
-    if (!memory_threshold.has_value()) {
+    auto threshold = resource_accountant->GetThreshold();
+    if (!threshold.has_value()) {
       // info_.gpu_mem_limit is for BFC arena
       size_t free_memory, total_memory;
       if (0 != cudaMemGetInfo(&free_memory, &total_memory)) {
@@ -2590,17 +2590,23 @@ CUDAExecutionProvider::GetCapability(const onnxruntime::GraphViewer& graph,
       } else {
         memory_threshold = std::min(free_memory, info_.gpu_mem_limit);
       }
+    } else {
+      memory_threshold = std::get<0>(threshold.value());
     }
 
-    memory_total = std::get<0>(resource_accountant->GetConsumedAmount());
+    consumed_memory = std::get<0>(resource_accountant->GetConsumedAmount());
     // Return early if already over the limit
-    if (memory_total > *memory_threshold) {
+    if (static_cast<size_t>(consumed_memory) > memory_threshold) {
       return result;
     }
   } else {
     memory_threshold = std::numeric_limits<size_t>::max();
   }
 
+  InlinedHashSet<NodeIndex> previously_assigned_nodes;
+  // On repeated calls to this function, we may have most of the nodes already
+  // assigned to a CUDA EP capability. We'll skip accounting for these nodes.
+  previously_assigned_nodes.reserve(graph.NumberOfNodes());
   InlinedVector<NodeIndex> candidates;
   // A subset of the above vector. A subset of the tentative_nodes might be moved to CPU.
   InlinedVector<NodeIndex> tentative_nodes;
@@ -2614,6 +2620,7 @@ CUDAExecutionProvider::GetCapability(const onnxruntime::GraphViewer& graph,
     if (!node.GetExecutionProviderType().empty()) {
       if (node.GetExecutionProviderType() == kCudaExecutionProvider) {
         candidates.push_back(node.Index());
+        previously_assigned_nodes.insert(node.Index());
       }
       continue;
     }
@@ -2669,9 +2676,25 @@ CUDAExecutionProvider::GetCapability(const onnxruntime::GraphViewer& graph,
     if (cpu_nodes.count(node_index) > 0)
       continue;
 
-    auto sub_graph = IndexedSubGraph::Create();
-    sub_graph->Nodes().push_back(node_index);
-    result.push_back(ComputeCapability::Create(std::move(sub_graph)));
+    // Previously assigned nodes have been accounted before
+    if (previously_assigned_nodes.count(node_index) > 0 || resource_accountant == nullptr) {
+      auto sub_graph = IndexedSubGraph::Create();
+      sub_graph->Nodes().push_back(node_index);
+      result.push_back(ComputeCapability::Create(std::move(sub_graph)));
+    } else {
+      auto resource_count = std::get<0>(resource_accountant->ComputeResourceCount(graph.GetGraph(), node_index));
+      if (resource_count + consumed_memory < memory_threshold) {
+        consumed_memory += resource_count;
+        auto sub_graph = IndexedSubGraph::Create();
+        sub_graph->SetAccountant(resource_accountant);
+        sub_graph->Nodes().push_back(node_index);
+        sub_graph->AppendNodeCost(resource_count);
+        result.push_back(ComputeCapability::Create(std::move(sub_graph)));
+      } else {
+        // We break here so we do not have patches of CUDA assigned nodes.
+        break;
+      }
+    }
   }
   /*
   std::vector<std::unique_ptr<ComputeCapability>> result;

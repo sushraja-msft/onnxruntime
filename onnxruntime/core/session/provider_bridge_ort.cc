@@ -769,6 +769,13 @@ struct ProviderHostImpl : ProviderHost {
 
   void IndexedSubGraph__SetSchemaSource(IndexedSubGraph* p, IndexedSubGraph_SourceOfSchema schema_source) override { p->schema_source = schema_source; }
   IndexedSubGraph_SourceOfSchema IndexedSubGraph__GetSchemaSource(const IndexedSubGraph* p) override { return p->schema_source; }
+  void IndexedSubGraph__SetAccountant(IndexedSubGraph* p, IResourceAccountant* resource_accountant) override {
+    p->SetAccountant(resource_accountant);
+  }
+  void IndexedSubGraph__AppendNodeCost(IndexedSubGraph* p, const ResourceCount& resource_count) override {
+    p->AppendNodeCost(resource_count);
+  }
+  void IndexedSubGraph__AppendNodeEmptyCost(IndexedSubGraph* p) override { p->AppendNodeEmptyCost(); }
 
   // KernelDef (wrapped)
   void KernelDef__operator_delete(KernelDef* p) override { delete p; }

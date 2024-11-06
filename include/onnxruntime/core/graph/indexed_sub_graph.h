@@ -72,28 +72,56 @@ struct IndexedSubGraph {
     return meta_def_.get();
   }
 
+  // Check if the accounting is enabled for the current EP
   bool IsAccountingEnabled() const {
     return resource_accountant != nullptr &&
            nodes_costs.size() == nodes.size();
   }
 
   // Should call IsAccountingEnabled() first
+  // Takes the previously computed ResourceCount for the node
+  // (usually during GetCapabiilty())
+  // if present and adds it to the consumed amount
   void AccountForNode(size_t cost_index) const {
     assert(cost_index < nodes_costs.size());
-    resource_accountant->AddConsumedAmount(nodes_costs[cost_index]);
+    if (nodes_costs[cost_index].has_value()) {
+      resource_accountant->AddConsumedAmount(*nodes_costs[cost_index]);
+    }
   }
 
+  // This computes and accounts for the resource cost for the node that just
+  // been fused from other nodes, and the EP did not had a chance to compute the costs.
   void ComputeAndAccountForNode(const Graph& graph, size_t node_index) const {
-    assert(IsAccountingEnabled());
+    assert(resource_accountant != nullptr);
     resource_accountant->AddConsumedAmount(resource_accountant->ComputeResourceCount(graph, node_index));
+  }
+
+  void SetAccountant(IResourceAccountant* res_accountant) {
+    resource_accountant = res_accountant;
+  }
+
+  // Append resource count to the list of costs for the nodes.
+  void AppendNodeCost(const ResourceCount& cost) {
+    assert(resource_accountant != nullptr);
+    nodes_costs.emplace_back(cost);
+  }
+
+  // Append an absent cost for the node that was already accounted for.
+  void AppendNodeEmptyCost() {
+    assert(resource_accountant != nullptr);
+    nodes_costs.emplace_back();
   }
 
  private:
   // subgraph meta definition.
   std::unique_ptr<MetaDef> meta_def_;
-  IResourceAccountant* resource_accountant = nullptr;  // Resource accountant for this subgraph.
+  // Optional resource accountant for this subgraph.
+  IResourceAccountant* resource_accountant = nullptr;
   // Vector with resource costs for nodes above. Should have the same size
-  InlinedVector<ResourceCount> nodes_costs;
+  // Some nodes that were previously accounted for because they already been assigned to an EP
+  // for example during multiple calls to GetCapabiility() will not have resource count present.
+  // may not have a resource count present, we skip it.
+  InlinedVector<std::optional<ResourceCount>> nodes_costs;
 };
 
 }  // namespace onnxruntime
