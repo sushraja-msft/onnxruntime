@@ -11,6 +11,10 @@
 #include <wrl/client.h>
 #include <wrl/implements.h>
 
+namespace onnxruntime {
+class IResourceAccountant;
+}
+
 namespace WRL {
 template <typename... TInterfaces>
 using Base = Microsoft::WRL::RuntimeClass<
@@ -89,7 +93,7 @@ namespace Dml
         GetCapability(
             const onnxruntime::GraphViewer& graph,
             const onnxruntime::IExecutionProvider::IKernelLookup& kernel_lookup,
-            IResourceAccountant* resource_accountant) const;
+            onnxruntime::IResourceAccountant* resource_accountant) const;
 
         uint32_t GetSupportedDeviceDataTypeMask() const;
 

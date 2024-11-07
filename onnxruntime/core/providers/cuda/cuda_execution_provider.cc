@@ -2576,9 +2576,10 @@ CUDAExecutionProvider::GetCapability(const onnxruntime::GraphViewer& graph,
                                      const IKernelLookup& kernel_lookup,
                                      IResourceAccountant* resource_accountant) const {
   std::vector<std::unique_ptr<ComputeCapability>> result;
+  const logging::Logger& logger = *GetLogger();
 
   // Figure out the memory limit if accountant is available
-  size_t memory_threshold;
+  size_t memory_threshold = std::numeric_limits<size_t>::max();
   SafeInt<size_t> consumed_memory = 0;
   if (resource_accountant != nullptr) {
     auto threshold = resource_accountant->GetThreshold();
@@ -2597,10 +2598,9 @@ CUDAExecutionProvider::GetCapability(const onnxruntime::GraphViewer& graph,
     consumed_memory = std::get<0>(resource_accountant->GetConsumedAmount());
     // Return early if already over the limit
     if (static_cast<size_t>(consumed_memory) > memory_threshold) {
+      LOGS(logger, INFO) << "CUDA EP returning early due to capacity threshold";
       return result;
     }
-  } else {
-    memory_threshold = std::numeric_limits<size_t>::max();
   }
 
   InlinedHashSet<NodeIndex> previously_assigned_nodes;
@@ -2610,7 +2610,6 @@ CUDAExecutionProvider::GetCapability(const onnxruntime::GraphViewer& graph,
   InlinedVector<NodeIndex> candidates;
   // A subset of the above vector. A subset of the tentative_nodes might be moved to CPU.
   InlinedVector<NodeIndex> tentative_nodes;
-  const logging::Logger& logger = *GetLogger();
   for (auto& node_index : graph.GetNodesInTopologicalOrder()) {
     const auto* p_node = graph.GetNode(node_index);
     if (p_node == nullptr)
@@ -2696,7 +2695,11 @@ CUDAExecutionProvider::GetCapability(const onnxruntime::GraphViewer& graph,
         result.push_back(ComputeCapability::Create(std::move(sub_graph)));
       } else {
         // We break here so we do not have patches of CUDA assigned nodes.
-        LOGS(logger, VERBOSE) << "Halting at node: " << node_index;
+        auto* node = graph.GetNode(node_index);
+        if (node != nullptr) {
+          LOGS(logger, INFO) << "CUDA EP Halting assignment due to capacity threshold at node: "
+                             << node->Name() << " index: " << node_index;
+        }
         break;
       }
     }
