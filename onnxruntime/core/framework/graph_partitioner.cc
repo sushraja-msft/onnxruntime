@@ -175,8 +175,9 @@ struct GetCapabilityForEPParams {
 
 auto get_capabilities = [](const IExecutionProvider& ep,
                            const GraphViewer& graph_viewer,
-                           const IExecutionProvider::IKernelLookup& kernel_lookup) {
-  auto capabilities = ep.GetCapability(graph_viewer, kernel_lookup);
+                           const IExecutionProvider::IKernelLookup& kernel_lookup,
+                           IResourceAccountant* resource_accountant) {
+  auto capabilities = ep.GetCapability(graph_viewer, kernel_lookup, resource_accountant);
 
   // In theory an EP could return an empty capability. Remove those.
   capabilities.erase(std::remove_if(capabilities.begin(), capabilities.end(),
@@ -212,7 +213,7 @@ static Status GetCapabilityForEP(const GetCapabilityForEPParams& params) {
 
   {
     const GraphViewer graph_viewer(graph);
-    capabilities = get_capabilities(current_ep, graph_viewer, kernel_lookup);
+    capabilities = get_capabilities(current_ep, graph_viewer, kernel_lookup, params.resource_accountant);
 
     if (capabilities.empty()) {
       return Status::OK();
@@ -250,7 +251,7 @@ static Status GetCapabilityForEP(const GetCapabilityForEPParams& params) {
     capabilities.clear();
 
     const GraphViewer graph_viewer(graph);
-    capabilities = get_capabilities(current_ep, graph_viewer, kernel_lookup);
+    capabilities = get_capabilities(current_ep, graph_viewer, kernel_lookup, params.resource_accountant);
 
     // all nodes with an index >= first_new_node with domain of kMSInternalNHWCDomain should be in the capabilities
     InlinedHashSet<NodeIndex> new_nodes_in_capabilities;
@@ -297,7 +298,7 @@ static Status GetCapabilityForEPForAotInlining(const GraphViewer& graph_viewer,
                                    kernel_registry_mgr.GetKernelTypeStrResolver()};
 
   // TODO: Provide EP with a capability to look inside the functions.
-  capabilities = get_capabilities(current_ep, graph_viewer, kernel_lookup);
+  capabilities = get_capabilities(current_ep, graph_viewer, kernel_lookup, nullptr);
 
   return Status::OK();
 }
@@ -1048,14 +1049,11 @@ Status GraphPartitioner::Partition(Graph& graph, FuncManager& func_mgr,
     // We use this only if Resource Aware Partitioning is enabled for any of the EPs
     ResourceAccountantMap ep_acc_map;
     // Zero, it is disabled by default
-    std::string cuda_memory_limit_config = config_options.GetConfigOrDefault(kOrtSessionOptionsConfigSetCudaMemoryLimitInMB, "0");
+    std::string cuda_memory_limit_config = config_options.GetConfigOrDefault(kOrtSessionOptionsConfigPartitionSetCudaMemoryLimitKb, "0");
     if (cuda_memory_limit_config != "0") {
-      if (cuda_memory_limit_config.empty()) {
-        ep_acc_map[kCudaExecutionProvider] = std::make_unique<SizeTAccountant>();
-      } else {
-        int cuda_memory_limit = std::stoi(cuda_memory_limit_config);
-        ep_acc_map[kCudaExecutionProvider] = std::make_unique<SizeTAccountant>(cuda_memory_limit);
-      }
+      SafeInt<size_t> cuda_memory_limit = std::stoi(cuda_memory_limit_config);
+      cuda_memory_limit *= 1024;
+      ep_acc_map[kCudaExecutionProvider] = std::make_unique<SizeTAccountant>(cuda_memory_limit);
     }
 
     ORT_RETURN_IF_ERROR(PartitionOnnxFormatModel(partition_params, mode,

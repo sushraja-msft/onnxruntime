@@ -2683,8 +2683,12 @@ CUDAExecutionProvider::GetCapability(const onnxruntime::GraphViewer& graph,
       result.push_back(ComputeCapability::Create(std::move(sub_graph)));
     } else {
       auto resource_count = std::get<0>(resource_accountant->ComputeResourceCount(graph.GetGraph(), node_index));
-      if (resource_count + consumed_memory < memory_threshold) {
-        consumed_memory += resource_count;
+      const auto would_be_consumed = resource_count + consumed_memory;
+      LOGS(logger, VERBOSE) << "Node: " << node_index << " Memory usage : " << resource_count
+                            << " would be consumed " << static_cast<size_t>(would_be_consumed)
+                            << " threshold: " << memory_threshold;
+      if (would_be_consumed < memory_threshold) {
+        consumed_memory = would_be_consumed;
         auto sub_graph = IndexedSubGraph::Create();
         sub_graph->SetAccountant(resource_accountant);
         sub_graph->Nodes().push_back(node_index);
@@ -2692,6 +2696,7 @@ CUDAExecutionProvider::GetCapability(const onnxruntime::GraphViewer& graph,
         result.push_back(ComputeCapability::Create(std::move(sub_graph)));
       } else {
         // We break here so we do not have patches of CUDA assigned nodes.
+        LOGS(logger, VERBOSE) << "Halting at node: " << node_index;
         break;
       }
     }
