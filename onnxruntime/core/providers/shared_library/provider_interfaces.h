@@ -995,7 +995,6 @@ struct ProviderHost {
   virtual const std::vector<NodeIndex>& GraphViewer__GetNodesInTopologicalOrder(const GraphViewer* p, int execution_order) = 0;
   virtual const std::vector<const NodeArg*>& GraphViewer__GetInputsIncludingInitializers(const GraphViewer* p) noexcept = 0;
   virtual const std::unordered_set<std::string>& GraphViewer__GetOuterScopeNodeArgNames(const GraphViewer* p) const noexcept = 0;
-  virtual size_t GraphViewer__ComputeNodeMemoryUsage(const GraphViewer*, NodeIndex) = 0;
 
   virtual void GraphViewer__ToProto(const GraphViewer* p,
                                     ONNX_NAMESPACE::GraphProto& graph_proto,
