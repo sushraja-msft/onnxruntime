@@ -1209,10 +1209,6 @@ struct ProviderHostImpl : ProviderHost {
 #endif
   }
 
-  size_t GraphViewer__ComputeNodeMemoryUsage(const GraphViewer* p, NodeIndex node_index) override {
-    return p->ComputeNodeMemoryUsage(node_index);
-  }
-
   const std::unordered_map<std::string, int>& GraphViewer__DomainToVersionMap(const GraphViewer* p) override { return p->DomainToVersionMap(); }
 
   const std::vector<NodeIndex>& GraphViewer__GetNodesInTopologicalOrder(const GraphViewer* p, int execution_order) override {

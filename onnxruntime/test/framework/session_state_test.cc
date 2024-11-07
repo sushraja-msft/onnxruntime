@@ -350,6 +350,7 @@ TEST(SessionStateTest, TestInitializerMemoryAllocatedUsingNonArenaMemory) {
   }
 }
 
+#ifdef USE_CUDA
 namespace {
 void BuildTestModel(Graph& graph, const std::vector<int64_t>& input_shape,
                     size_t approx_init_a_size,
@@ -385,7 +386,6 @@ void BuildTestModel(Graph& graph, const std::vector<int64_t>& input_shape,
 }
 }  // namespace
 
-#ifdef USE_CUDA
 /// XXX: Optionally add resource aware parameters
 /// This test can only run with CUDA present currently.
 TEST(SessionStateTest, TestResourceAwarePartitioning_NoLimit) {

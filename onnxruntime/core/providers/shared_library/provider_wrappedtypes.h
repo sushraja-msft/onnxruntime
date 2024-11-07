@@ -1070,9 +1070,6 @@ class GraphViewer final {
   const std::unordered_set<std::string>& GetOuterScopeNodeArgNames() const noexcept {
     return g_host->GraphViewer__GetOuterScopeNodeArgNames(this);
   }
-  size_t ComputeNodeMemoryUsage(NodeIndex node_index) const {
-    return g_host->GraphViewer__ComputeNodeMemoryUsage(this, node_index);
-  }
 
   void ToProto(ONNX_NAMESPACE::GraphProto& graph_proto,
                bool include_initializers,
