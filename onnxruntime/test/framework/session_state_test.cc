@@ -390,7 +390,6 @@ void BuildTestModel(Graph& graph, const std::vector<int64_t>& input_shape,
 /// This test can only run with CUDA present currently.
 TEST(SessionStateTest, TestResourceAwarePartitioning_NoLimit) {
   const auto& log_manager = DefaultLoggingManager();
-  // log_manager.SetDefaultLoggerVerbosity(1);
   log_manager.SetDefaultLoggerSeverity(onnxruntime::logging::Severity::kVERBOSE);
   const auto& default_logger = log_manager.DefaultLogger();
   std::unordered_map<std::string, int> domain_to_version;
@@ -450,7 +449,6 @@ TEST(SessionStateTest, TestResourceAwarePartitioning_NoLimit) {
 
 TEST(SessionStateTest, TestResourceAwarePartitioning_LargeLimit) {
   const auto& log_manager = DefaultLoggingManager();
-  // log_manager.SetDefaultLoggerVerbosity(1);
   log_manager.SetDefaultLoggerSeverity(onnxruntime::logging::Severity::kVERBOSE);
   const auto& default_logger = log_manager.DefaultLogger();
   std::unordered_map<std::string, int> domain_to_version;
@@ -512,7 +510,6 @@ TEST(SessionStateTest, TestResourceAwarePartitioning_LargeLimit) {
 
 TEST(SessionStateTest, TestResourceAwarePartitioning_SecondNodeCutOff) {
   const auto& log_manager = DefaultLoggingManager();
-  // log_manager.SetDefaultLoggerVerbosity(1);
   log_manager.SetDefaultLoggerSeverity(onnxruntime::logging::Severity::kVERBOSE);
   const auto& default_logger = log_manager.DefaultLogger();
   std::unordered_map<std::string, int> domain_to_version;
