@@ -823,7 +823,8 @@ static Status PartitionOnnxFormatModel(const PartitionParams& partition_params, 
 
 static Status PartitionOrtFormatModelImpl(const PartitionParams& partition_params,
                                           KernelRegistryManager& kernel_registry_mgr,
-                                          IExecutionProvider& current_ep) {
+                                          IExecutionProvider& current_ep,
+                                          IResourceAccountant* resource_accountant) {
   // handle testing edge case where optimizers or constant lifting results in graph with no nodes.
   // doing it here saves all providers checking for this in GetCapability
   auto& graph = partition_params.graph.get();
@@ -837,7 +838,8 @@ static Status PartitionOrtFormatModelImpl(const PartitionParams& partition_param
       auto& subgraph = *entry.second;
       PartitionParams subgraph_partition_params = partition_params;
       subgraph_partition_params.graph = std::ref(subgraph);
-      ORT_RETURN_IF_ERROR(PartitionOrtFormatModelImpl(subgraph_partition_params, kernel_registry_mgr, current_ep));
+      ORT_RETURN_IF_ERROR(PartitionOrtFormatModelImpl(subgraph_partition_params, kernel_registry_mgr,
+                                                      current_ep, resource_accountant));
     }
   }
 
@@ -853,6 +855,7 @@ static Status PartitionOrtFormatModelImpl(const PartitionParams& partition_param
       std::cref(partition_params.transform_layout_function),
       std::cref(partition_params.debug_graph_fn),
 #endif  // !defined(ORT_MINIMAL_BUILD) || defined(ORT_EXTENDED_MINIMAL_BUILD)
+      resource_accountant
   };
   // clang-format on
 
@@ -944,10 +947,17 @@ static Status PartitionOrtFormatModelImpl(const PartitionParams& partition_param
 // Simplified partitioning where custom EPs may produce compiled nodes.
 static Status PartitionOrtFormatModel(const PartitionParams& partition_params,
                                       const ExecutionProviders& execution_providers,
-                                      KernelRegistryManager& kernel_registry_manager) {
+                                      KernelRegistryManager& kernel_registry_manager,
+                                      const ResourceAccountantMap& acc_map) {
   // process full graph with each EP
   for (const auto& ep : execution_providers) {
-    ORT_RETURN_IF_ERROR(PartitionOrtFormatModelImpl(partition_params, kernel_registry_manager, *ep));
+    IResourceAccountant* resource_accountant = nullptr;
+    auto hit = acc_map.find(ep->Type());
+    if (hit != acc_map.end()) {
+      resource_accountant = hit->second.get();
+    }
+    ORT_RETURN_IF_ERROR(PartitionOrtFormatModelImpl(partition_params, kernel_registry_manager, *ep,
+                                                    resource_accountant));
   }
 
   return Status::OK();
@@ -1043,18 +1053,18 @@ Status GraphPartitioner::Partition(Graph& graph, FuncManager& func_mgr,
 
 #endif  // !defined(ORT_MINIMAL_BUILD) || defined(ORT_EXTENDED_MINIMAL_BUILD)
 
+  // We use this only if Resource Aware Partitioning is enabled for any of the EPs
+  ResourceAccountantMap ep_acc_map;
+  // Zero, it is disabled by default
+  std::string cuda_memory_limit_config = config_options.GetConfigOrDefault(kOrtSessionOptionsConfigPartitionSetCudaMemoryLimitKb, "0");
+  if (cuda_memory_limit_config != "0") {
+    SafeInt<size_t> cuda_memory_limit = std::stoi(cuda_memory_limit_config);
+    cuda_memory_limit *= 1024;
+    ep_acc_map[kCudaExecutionProvider] = std::make_unique<SizeTAccountant>(cuda_memory_limit);
+  }
+
   if (mode == Mode::kNormal || mode == Mode::kAssignOnly) {
 #if !defined(ORT_MINIMAL_BUILD)
-
-    // We use this only if Resource Aware Partitioning is enabled for any of the EPs
-    ResourceAccountantMap ep_acc_map;
-    // Zero, it is disabled by default
-    std::string cuda_memory_limit_config = config_options.GetConfigOrDefault(kOrtSessionOptionsConfigPartitionSetCudaMemoryLimitKb, "0");
-    if (cuda_memory_limit_config != "0") {
-      SafeInt<size_t> cuda_memory_limit = std::stoi(cuda_memory_limit_config);
-      cuda_memory_limit *= 1024;
-      ep_acc_map[kCudaExecutionProvider] = std::make_unique<SizeTAccountant>(cuda_memory_limit);
-    }
 
     ORT_RETURN_IF_ERROR(PartitionOnnxFormatModel(partition_params, mode,
                                                  providers_, kernel_registry_mgr_,
@@ -1072,7 +1082,7 @@ Status GraphPartitioner::Partition(Graph& graph, FuncManager& func_mgr,
 #endif  //! defined(ORT_MINIMAL_BUILD)
   } else {
     ORT_RETURN_IF_ERROR(PartitionOrtFormatModel(partition_params,
-                                                providers_, kernel_registry_mgr_));
+                                                providers_, kernel_registry_mgr_, ep_acc_map));
   }
 
 #if !defined(ORT_MINIMAL_BUILD) || defined(ORT_EXTENDED_MINIMAL_BUILD)
