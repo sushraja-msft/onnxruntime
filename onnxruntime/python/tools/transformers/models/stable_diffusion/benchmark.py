@@ -22,6 +22,9 @@ SD_MODELS = {
     "2.0": "stabilityai/stable-diffusion-2",
     "2.1": "stabilityai/stable-diffusion-2-1",
     "xl-1.0": "stabilityai/stable-diffusion-xl-refiner-1.0",
+    "3.0": "stabilityai/stable-diffusion-3-medium-diffusers",
+    "3.5": "stabilityai/stable-diffusion-3.5-medium-diffusers",
+    "3.5-large": "stabilityai/stable-diffusion-3.5-large-diffusers",
 }
 
 PROVIDERS = {
@@ -322,22 +325,23 @@ def get_optimum_ort_pipeline(
     disable_safety_checker: bool = True,
     use_io_binding: bool = False,
 ):
-    from optimum.onnxruntime import ORTStableDiffusionPipeline, ORTStableDiffusionXLPipeline
+    from optimum.onnxruntime import ORTPipelineForText2Image, ORTStableDiffusionPipeline, ORTStableDiffusionXLPipeline
 
     if directory is not None and os.path.exists(directory):
-        if "xl" in model_name:
-            pipeline = ORTStableDiffusionXLPipeline.from_pretrained(
-                directory,
-                provider=provider,
-                session_options=None,
-                use_io_binding=False,  # Not supported by Optimum version 1.17.1 at the time of verification.
-            )
-        else:
-            pipeline = ORTStableDiffusionPipeline.from_pretrained(
-                directory,
-                provider=provider,
-                use_io_binding=use_io_binding,
-            )
+        pipeline = ORTPipelineForText2Image.from_pretrained(directory, provider=provider, use_io_binding=use_io_binding)
+        # if "xl" in model_name:
+        #     pipeline = ORTStableDiffusionXLPipeline.from_pretrained(
+        #         directory,
+        #         provider=provider,
+        #         session_options=None,
+        #         use_io_binding=False,  # Not supported by Optimum version 1.17.1 at the time of verification.
+        #     )
+        # else:
+        #     pipeline = ORTStableDiffusionPipeline.from_pretrained(
+        #         directory,
+        #         provider=provider,
+        #         use_io_binding=use_io_binding,
+        #     )
     elif "xl" in model_name:
         pipeline = ORTStableDiffusionXLPipeline.from_pretrained(
             model_name,
