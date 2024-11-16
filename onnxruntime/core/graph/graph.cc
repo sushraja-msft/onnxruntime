@@ -4095,6 +4095,7 @@ ONNX_NAMESPACE::GraphProto Graph::ToGraphProtoWithExternalInitializers(const std
   // be empty. Else, save external data file in same directory as the model.
   const std::filesystem::path modified_external_file_path = model_file_path.parent_path() / external_file_path;
 
+  // Create the external file.
   std::ofstream external_stream(modified_external_file_path, std::ofstream::out | std::ofstream::binary);
   ORT_ENFORCE(external_stream.is_open());
   int64_t external_offset = 0;
@@ -4140,14 +4141,13 @@ ONNX_NAMESPACE::GraphProto Graph::ToGraphProtoWithExternalInitializers(const std
 
         // padding tensor with zeros for alignment
         for (int64_t index = external_offset; index != new_external_offset; ++index) {
-          external_stream << '0';
+          external_stream << '\0';
         }
-
         external_offset = new_external_offset;
       }
 
-      for (size_t index = 0; index != tensor_bytes_size; ++index) {
-        external_stream << raw_data[index];
+      if (!external_stream.write(reinterpret_cast<const char*>(raw_data.data()), tensor_bytes_size)) {
+        ORT_THROW("Failed to write external initializers to file: ", modified_external_file_path);
       }
 
       output_proto->set_data_location(ONNX_NAMESPACE::TensorProto_DataLocation::TensorProto_DataLocation_EXTERNAL);
@@ -4172,6 +4172,10 @@ ONNX_NAMESPACE::GraphProto Graph::ToGraphProtoWithExternalInitializers(const std
 #if !defined(DISABLE_SPARSE_TENSORS)
     }
 #endif
+  }
+
+  if (!external_stream.flush()) {
+    ORT_THROW("Failed to flush file with external initializers: ", modified_external_file_path);
   }
 
   return result;
