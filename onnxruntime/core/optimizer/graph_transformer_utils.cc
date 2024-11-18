@@ -68,6 +68,7 @@
 #include "core/optimizer/qdq_transformer/qdq_propagation.h"
 #include "core/optimizer/qdq_transformer/qdq_s8_to_u8.h"
 #include "core/optimizer/qdq_transformer/relu_quantizelinear.h"
+#include "core/optimizer/qdq_transformer/bias_quantization.h"
 #include "core/optimizer/quick_gelu_fusion.h"
 #include "core/optimizer/relu_clip_fusion.h"
 #include "core/optimizer/reshape_fusion.h"
@@ -249,6 +250,8 @@ InlinedVector<std::unique_ptr<GraphTransformer>> GenerateTransformers(
         // It runs unconditionally in InferenceSession::TransformGraph() prior to Level1 optimizers.
         // We also put it here with other Level1 optimizers so that it can fix things up after their changes.
         transformers.emplace_back(std::make_unique<EnsureUniqueDQForNodeUnit>());
+
+        transformers.emplace_back(std::make_unique<BiasQuantization>());
       }
 
       // add __backwardpass attribute to nodes after YieldOp, ROCm-only

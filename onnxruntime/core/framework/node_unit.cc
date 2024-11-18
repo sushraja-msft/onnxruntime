@@ -156,6 +156,7 @@ std::vector<NodeUnitIODef> GetQDQIODefs(const Node& target_node, const QDQ::Node
 
 Status QDQ::NodeGroup::CanCreateNodeGroup(const GraphViewer& graph_viewer,
                                           const Node& target_node,
+                                          const Node* p_activation_node,
                                           gsl::span<const Node* const> dq_nodes,
                                           gsl::span<const Node* const> q_nodes) {
   // Within a QDQ node group, a target node input is the only consumer of each DQ.
@@ -176,14 +177,25 @@ Status QDQ::NodeGroup::CanCreateNodeGroup(const GraphViewer& graph_viewer,
                       dq_node->Name(), ", target node: ", target_node.Name());
   }
 
+  const Node* p_next_node = &target_node;
+  if (p_activation_node) {
+    // If there is an activation node, it should be the only consumer of the target node.
+    ORT_RETURN_IF_NOT(
+        target_node.GetOutputEdgesCount() == 1 &&
+            target_node.OutputEdgesBegin()->GetNode().Index() == p_activation_node->Index() &&
+            (p_activation_node->OpType() == "Relu" || p_activation_node->OpType() == "Clip"),
+        "QDQ node group can support Relu/Clip activation and it's the only consumer of the target node.");
+    p_next_node = p_activation_node;
+  }
+
   // an output from the target node can have either Q consumers or direct consumers. it cannot have both.
   // this must be checked on a per output basis.
   // e.g. TopK produces values and indices. The indices output won't be quantized, so even if we replace the TopK QDQ
   // node group with a quantized TopK, an int64_t indices value will be produced and can provide a graph output.
   if (!q_nodes.empty()) {
-    auto cur_edge = target_node.OutputEdgesBegin();
-    auto end_edge = target_node.OutputEdgesEnd();
-    std::vector<const Node*> output_consumers(target_node.OutputDefs().size(), nullptr);
+    auto cur_edge = p_next_node->OutputEdgesBegin();
+    auto end_edge = p_next_node->OutputEdgesEnd();
+    std::vector<const Node*> output_consumers(p_next_node->OutputDefs().size(), nullptr);
 
     for (; cur_edge != end_edge; ++cur_edge) {
       auto output_idx = cur_edge->GetSrcArgIndex();
@@ -202,7 +214,7 @@ Status QDQ::NodeGroup::CanCreateNodeGroup(const GraphViewer& graph_viewer,
         ORT_RETURN_IF_NOT(valid,
                           "QDQ node group cannot have an output from the target node being consumed by a Q node and "
                           "a non-Q node. target node: ",
-                          target_node.Name());
+                          p_next_node->Name());
       } else {
         output_consumers[output_idx] = &this_consumer;
       }
@@ -213,7 +225,7 @@ Status QDQ::NodeGroup::CanCreateNodeGroup(const GraphViewer& graph_viewer,
       // any output with a Q cannot be a graph output as it will disappear if the QDQ node unit is converted to
       // a quantized op.
       if (output_consumers[idx] != nullptr && output_consumers[idx]->OpType() == "QuantizeLinear") {
-        const auto& output_name = target_node.OutputDefs()[idx]->Name();
+        const auto& output_name = p_next_node->OutputDefs()[idx]->Name();
         bool is_graph_output = std::any_of(graph_outputs.begin(), graph_outputs.end(),
                                            [&output_name](const NodeArg* node_arg) {
                                              return node_arg->Name() == output_name;
@@ -221,7 +233,7 @@ Status QDQ::NodeGroup::CanCreateNodeGroup(const GraphViewer& graph_viewer,
         ORT_RETURN_IF(is_graph_output,
                       "QDQ node group cannot have an output from the target node that is consumed by a Q node and "
                       "a graph output. target node: ",
-                      target_node.Name(), " output idx:", idx);
+                      p_next_node->Name(), " output idx:", idx);
       }
     }
   }
@@ -238,11 +250,12 @@ NodeUnit::NodeUnit(const Node& node)
 NodeUnit::NodeUnit(const GraphViewer& graph_viewer, const QDQ::NodeGroup& node_group)
     : dq_nodes_{GetQDQIONodes(graph_viewer, node_group, true /* is_input */)},
       target_node_(*graph_viewer.GetNode(node_group.target_node)),
+      p_activation_node_{node_group.activation_node.has_value() ? graph_viewer.GetNode(node_group.activation_node.value()) : nullptr},
       q_nodes_{GetQDQIONodes(graph_viewer, node_group, false /* is_input */)},
       type_(Type::QDQGroup),
       inputs_{GetQDQIODefs(target_node_, node_group, true /* is_input */)},
-      outputs_{GetQDQIODefs(target_node_, node_group, false /* is_input */)} {
-  ORT_THROW_IF_ERROR(QDQ::NodeGroup::CanCreateNodeGroup(graph_viewer, target_node_, dq_nodes_, q_nodes_));
+      outputs_{node_group.activation_node.has_value() ? GetQDQIODefs(*p_activation_node_, node_group, false /* is_input */) : GetQDQIODefs(target_node_, node_group, false /* is_input */)} {
+  ORT_THROW_IF_ERROR(QDQ::NodeGroup::CanCreateNodeGroup(graph_viewer, target_node_, p_activation_node_, dq_nodes_, q_nodes_));
 
   input_edge_count_ = std::accumulate(dq_nodes_.cbegin(), dq_nodes_.cend(), size_t(0),
                                       [](size_t acc, const Node* node) { return acc + node->GetInputEdgesCount(); });
@@ -253,8 +266,9 @@ NodeUnit::NodeUnit(const GraphViewer& graph_viewer, const QDQ::NodeGroup& node_g
 
   // create output edges. each target node output either goes to Q node/s or non-Q node/s.
   // ValidateNodeGroupQDQNodes ensures this.
-  auto cur_edge = target_node_.OutputEdgesBegin();
-  auto end_edge = target_node_.OutputEdgesEnd();
+  const Node* p_next_node = p_activation_node_ ? p_activation_node_ : &target_node_;
+  auto cur_edge = p_next_node->OutputEdgesBegin();
+  auto end_edge = p_next_node->OutputEdgesEnd();
   for (; cur_edge != end_edge; ++cur_edge) {
     const Node& node = cur_edge->GetNode();
 
@@ -273,12 +287,13 @@ NodeUnit::NodeUnit(const GraphViewer& graph_viewer, const QDQ::NodeGroup& node_g
   }
 }
 
-NodeUnit::NodeUnit(gsl::span<const Node* const> dq_nodes, const Node& target_node,
+NodeUnit::NodeUnit(gsl::span<const Node* const> dq_nodes, const Node& target_node, const Node* p_activation_node,
                    gsl::span<const Node* const> q_nodes, Type unit_type,
                    gsl::span<const NodeUnitIODef> inputs, gsl::span<const NodeUnitIODef> outputs,
                    size_t input_edge_count, Node::EdgeSet output_edges)
     : dq_nodes_(dq_nodes.begin(), dq_nodes.end()),
       target_node_(target_node),
+      p_activation_node_(p_activation_node),
       q_nodes_(q_nodes.begin(), q_nodes.end()),
       type_(unit_type),
       inputs_(inputs.begin(), inputs.end()),
