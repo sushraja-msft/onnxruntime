@@ -2087,6 +2087,10 @@ common::Status InferenceSession::Initialize() {
     const bool save_prepacked_constant_initializers = GetSavePrepackedInitializersFlag(
         session_options_.config_options, saving_model, saving_ort_format, *session_logger_);
 
+    // Used either to house memory mapped prepacked weights or
+    // for saving them to disk when enabled.
+    session_state_->CreateContainerForSerializedPrepacked(save_prepacked_constant_initializers);
+
     ORT_RETURN_IF_ERROR_SESSIONID_(
         session_state_->FinalizeSessionState(model_location_, kernel_registry_manager_,
                                              // need to keep the initializers if saving the optimized model
@@ -2120,11 +2124,6 @@ common::Status InferenceSession::Initialize() {
         if (optimized_model_external_initializers_file_name.empty()) {
           ORT_RETURN_IF_ERROR_SESSIONID_(Model::Save(*model_, session_options_.optimized_model_filepath));
         } else {
-          std::optional<PrepackedWeightsForSerialization> prepacked_for_serialization;
-          if (save_prepacked_constant_initializers) {
-            prepacked_for_serialization.emplace();
-          }
-
           const size_t optimized_model_external_initializers_min_size_in_bytes =
               ParseStringWithClassicLocale<size_t>(session_options_.config_options.GetConfigOrDefault(
                   kOrtSessionOptionsOptimizedModelExternalInitializersMinSizeInBytes, "1024"));

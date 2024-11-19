@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "core/common/common.h"
 #include "core/framework/allocator.h"
 #include "prepacked_weights.h"
 
@@ -13,6 +14,8 @@
 #include <unordered_map>
 
 namespace onnxruntime {
+
+class Graph;
 
 class PrepackedWeightsContainer final {
  public:
@@ -65,41 +68,95 @@ class PrepackedWeightsContainer final {
 };
 
 /// <summary>
-/// This class provides a storage container for PrePackedWeights instances
-/// for storing pre-packed weights in the external file.
-/// After serialization on disk it can be used to pre-populate shared pre-packed
-/// weights if enabled, and also can be used to populate kernels as well.
+/// This class has a dual purpose.
+/// When saving to disk is ON
+/// it provides a storage container for PrePackedWeights instances
+/// for storing pre-packed weights in the external file. In this mode
+/// we do not read any pre-packed weights from disk.
+///
+/// If saving is OFF, it is used to contain the weights memory mapped from disk.
+/// Those weights are then fed to shared container if weights sharing is enabled
+/// and then to the individual kernels.
 /// </summary>
-class PrepackedWeightsForSerialization final {
+class PrepackedForSerialization final {
  public:
-  PrepackedWeightsForSerialization() = default;
-  ~PrepackedWeightsForSerialization() = default;
+  explicit PrepackedForSerialization(bool overwrite_for_save = false);
+  ~PrepackedForSerialization();
 
-  /// <summary>
-  /// Add weight with a key for a given initializer
-  /// </summary>
-  /// <param name="weight_name"></param>
-  /// <param name="key"></param>
-  /// <param name="packed_weight"></param>
-  /// <returns></returns>
-  void WriteWeight(const std::string& weight_name, std::string key, PrePackedWeights&& packed_weight);
-
-  size_t GetBlobNumForWeight(const std::string& weight_name) const;
-
-  const PrePackedWeights& GetBlobForWeight(const std::string& weight_name, size_t index) const;
-
- private:
-  AllocatorPtr cpu_allocator_;
-
-  // Map of key to pre-packed blobs
+  ORT_DISALLOW_COPY_ASSIGNMENT_AND_MOVE(PrepackedForSerialization);
 
   using KeyToBlobMap = std::unordered_map<std::string, PrePackedWeights>;
   using KeyToBlobMapIterator = KeyToBlobMap::iterator;
+  using BlobsInderect = std::vector<KeyToBlobMapIterator>;
+  using BlobsConstIterator = BlobsInderect::const_iterator;
 
+  // Maps weight name to iterators in key_to_blobs_. It associates a weight name with its pre-packs.
+  // Normally, a single weight produces a single PrePackedWeights. But it is possible that a weight
+  // is pre-packed by different kernels.
+  using WeightToPrePacksMap = std::unordered_map<std::string, BlobsInderect>;
+
+  class Subgraph {
+   public:
+    Subgraph(Subgraph* par, KeyToBlobMap& key_blobs, bool overwrite_for_save)
+        : overwrite_for_save_(overwrite_for_save), parent_(par), key_to_blobs_(key_blobs) {
+    }
+
+    ORT_DISALLOW_COPY_ASSIGNMENT_AND_MOVE(Subgraph);
+
+    Subgraph* Parent() noexcept {
+      return parent_;
+    }
+
+    Subgraph& GetOrCreateSubgraph(const Graph* graph) {
+      auto result = subgraph_prepacks_.emplace(graph, nullptr);
+      if (result.second) {
+        result.first->second = std::make_unique<Subgraph>(this, key_to_blobs_, overwrite_for_save_);
+      }
+      return *result.first->second;
+    }
+
+    const Subgraph* GetSubgraph(const Graph* graph) const {
+      auto it = subgraph_prepacks_.find(graph);
+      return it == subgraph_prepacks_.end() ? nullptr : it->second.get();
+    }
+
+    // This does not populate per-initializer structures.
+    void InsertFromDisk(std::string key, PrePackedWeights&& packed_weight);
+
+    bool CreateOrOverWrite(const std::string& weight_name, std::string key,
+                           PrePackedWeights&& packed_weight);
+
+    const PrePackedWeights* GetPrepackedWeights(const std::string& key) const;
+
+    PrePackedWeights* GetPrepackedWeights(const std::string& key);
+
+    bool IsOverWriteForSave() const noexcept {
+      return overwrite_for_save_;
+    }
+
+   private:
+    bool overwrite_for_save_;
+    Subgraph* parent_ = nullptr;
+    KeyToBlobMap& key_to_blobs_;
+    WeightToPrePacksMap weight_to_pre_packs_;
+    // Map Graph ptr to subgraphs
+    std::unordered_map<const Graph*, std::unique_ptr<Subgraph>> subgraph_prepacks_;
+  };
+
+  const Subgraph& MainGraph() const noexcept {
+    return main_graph_;
+  }
+
+  Subgraph& MainGraph() noexcept {
+    return main_graph_;
+  }
+
+ private:
+  // Map of key to pre-packed blobs.This is common for all subgraphs
+  // The key is : op_type + "+" + hash_of_prepacked_buffers_in_the_PrepackedWeights_instance.
+  // as defined above. We store keys for all scopes (main graph and subgraphs)
   KeyToBlobMap key_to_blobs_;
-
-  using WeightToPrePacksMap = std::unordered_map<std::string, std::vector<KeyToBlobMapIterator>>;
-  WeightToPrePacksMap weight_to_prepacks_;
+  Subgraph main_graph_;
 };
 
 }  // namespace onnxruntime

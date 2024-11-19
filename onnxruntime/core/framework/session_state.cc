@@ -396,8 +396,9 @@ static std::string GenerateKeyForPrepackedWeightsMap(const std::string& op_type,
   return ss_1.str();
 }
 
-Status SessionState::PrepackConstantInitializedTensors(InlinedHashMap<std::string, size_t>& constant_initializers_use_count,
-                                                       const std::unordered_map<std::string, const OrtValue*>& initializers_to_share_map) {
+Status SessionState::PrepackConstantInitializedTensors(
+    InlinedHashMap<std::string, size_t>& constant_initializers_use_count,
+    const std::unordered_map<std::string, const OrtValue*>& initializers_to_share_map) {
   auto prepacked_constant_weights = [this, &constant_initializers_use_count, &initializers_to_share_map](
                                         bool should_cache_prepacked_weights_for_shared_initializers) -> Status {
     for (auto& node : GetGraphViewer().Nodes()) {
@@ -1068,9 +1069,12 @@ Status SessionState::CreateSubgraphSessionState() {
 
 // Calculate the use count of a constant initialized tensor, including the use in subgraph.
 // Note: This function doesn't handle the case below:
-// The main graph has a constant initializer called X, and the subgraph also has a constant initializer called X, which overrides the X from main graph.
-// For case like this, the current implementation will calculate the use count as 2, but they could contain completely different values so each should have a use count of 1.
-// This is a very rare case. If it happens and X is prepacked, the consequence is that X won't be released and memory usage of X won't be saved. This will be fine.
+// The main graph has a constant initializer called X, and the subgraph also has a constant initializer called X,
+// which overrides the X from main graph.
+// For case like this, the current implementation will calculate the use count as 2, but they could contain completely
+// different values so each should have a use count of 1.
+// This is a very rare case. If it happens and X is prepacked, the consequence is that X won't be released and memory
+// usage of X won't be saved. This will be fine.
 static void ComputeConstantInitializerUseCount(const Graph& graph, InlinedHashMap<std::string, size_t>& constant_initializers_use_count) {
   for (const auto& node : graph.Nodes()) {
     for (const auto* arg : node.InputDefs()) {
@@ -1189,7 +1193,9 @@ Status SessionState::FinalizeSessionState(const std::basic_string<PATH_CHAR_TYPE
   InlinedHashMap<std::string, size_t> constant_initializers_use_count;
   ComputeConstantInitializerUseCount(graph_, constant_initializers_use_count);
   return FinalizeSessionStateImpl(graph_location, kernel_registry_manager, nullptr, sess_options_,
-                                  remove_initializers, constant_initializers_use_count);
+                                  remove_initializers,
+
+                                  constant_initializers_use_count);
 }
 
 static Status Index(const OrtValueNameIdxMap& ort_value_name_idx_map,
@@ -1323,6 +1329,7 @@ Status SessionState::FinalizeSessionStateImpl(const std::basic_string<PATH_CHAR_
                                               const SessionOptions& session_options,
                                               bool remove_initializers,
                                               InlinedHashMap<std::string, size_t>& constant_initializers_use_count,
+                                              PrepackedForSerialization::Subgraph& prepacked_subgraph,
                                               const InlinedHashMap<OrtValueName, OrtDevice>& outer_scope_node_arg_to_location_map,
                                               bool graph_info_already_created) {
   if (!graph_info_already_created) {
@@ -1544,9 +1551,13 @@ Status SessionState::FinalizeSessionStateImpl(const std::basic_string<PATH_CHAR_
                                                                node,
                                                                subgraph_session_state.GetGraphViewer(),
                                                                subgraph_outer_scope_node_arg_to_location_map));
+
+      auto& next_prepacked_subgraph = prepacked_subgraph.GetOrCreateSubgraph(
+          &subgraph_session_state.GetGraphViewer().GetGraph());
       ORT_RETURN_IF_ERROR(subgraph_session_state.FinalizeSessionStateImpl(
           graph_location, kernel_registry_manager, &node, subgraph_session_options, remove_initializers,
-          constant_initializers_use_count, subgraph_outer_scope_node_arg_to_location_map, true));
+          constant_initializers_use_count, next_prepacked_subgraph,
+          subgraph_outer_scope_node_arg_to_location_map, true));
 
       // setup all the info for handling the feeds and fetches used in subgraph execution
       auto* p_op_kernel = GetMutableKernel(node.Index());

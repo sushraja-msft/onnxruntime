@@ -364,6 +364,11 @@ class SessionState {
 
   const SessionOptions& GetSessionOptions() const { return sess_options_; }
 
+  // Used only for top level session state
+  void CreateContainerForSerializedPrepacked(bool overwrite_for_save) {
+    prepacked_weights_for_serialization_.emplace(overwrite_for_save);
+  }
+
  private:
   ORT_DISALLOW_COPY_ASSIGNMENT_AND_MOVE(SessionState);
 
@@ -400,6 +405,7 @@ class SessionState {
                                   const SessionOptions& session_options,
                                   bool remove_initializers,
                                   InlinedHashMap<std::string, size_t>& constant_initializers_use_count,
+                                  PrepackedForSerialization::Subgraph& prepacked_subgraph,
                                   const InlinedHashMap<OrtValueName, OrtDevice>& outer_scope_node_arg_to_location_map = {},
                                   bool graph_info_already_created = false);
 
@@ -528,6 +534,9 @@ class SessionState {
   // the cache is valid until any session reliant on it is still in scope.
   // prepacked_weights_container_ can be nullptr if no caching is required for prepacked weights
   PrepackedWeightsContainer* const prepacked_weights_container_{};
+  // This container serves either for reading and using pre-packed weights from disk
+  // of serializing to disk
+  std::optional<PrepackedForSerialization> prepacked_weights_for_serialization_;
 
 #ifdef ENABLE_TRAINING
 // Needed for ORTTrainer. Should be removed along with ORTTrainer code
