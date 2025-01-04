@@ -427,6 +427,9 @@ std::vector<const char*> WebGpuContext::GetEnabledAdapterToggles() const {
   constexpr const char* toggles[] = {
       "use_dxc",
       "allow_unsafe_apis",
+      "dump_shaders",
+      "disable_symbol_renaming",
+      "emit_hlsl_debug_symbols"
   };
   return std::vector<const char*>(std::begin(toggles), std::end(toggles));
 }
@@ -438,6 +441,11 @@ std::vector<const char*> WebGpuContext::GetEnabledDeviceToggles() const {
       "skip_validation",  // only use "skip_validation" when ValidationMode is set to "Disabled"
       "disable_robustness",
       "d3d_disable_ieee_strictness",
+      "use_dxc",
+      "allow_unsafe_apis",
+      "dump_shaders",
+      "disable_symbol_renaming",
+      "emit_hlsl_debug_symbols"
   };
   return std::vector<const char*>(ValidationMode() >= ValidationMode::WGPUOnly
                                       ? std::begin(toggles) + 1
