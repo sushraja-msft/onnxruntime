@@ -402,7 +402,7 @@ const INNER_DIMENSION_ITEMS_PER_CYCLE : u32 = 16u; // (QUANTIZATION_BLOCK_SIZE/V
 const VECTORIZED_QUANTIZATION_BLOCK_SIZE: u32 = 8u; // QUANTIZATION_BLOCK_SIZE / VALUES_PER_VEC4;
 
 //Shared memory
-var<workgroup> tile_B : array<array<input_a_value_t, INNER_DIMENSION_ITEMS_PER_CYCLE>, TILE_SIZE>;
+var<workgroup> tile_B : array<array<input_a_value_t, TILE_SIZE>, INNER_DIMENSION_ITEMS_PER_CYCLE>;
 var<workgroup> tile_O : array<array<output_value_t, TILE_SIZE>, TILE_SIZE * A_REPEAT>;
 
 fn getBScale(slot: u32, b_global : u32, vec_step_idx : u32, scale_idx: u32) -> output_value_t
@@ -431,14 +431,16 @@ fn loadB(slot: u32, b_global : u32, vec_step_idx : u32, parallel_id : u32)
       let b_value = input_b[b_global*uniforms.K8+weight_offset];
       let b_value_lower = unpack4xU8(b_value & 0x0F0F0F0Fu);
       let b_value_upper = unpack4xU8((b_value >> 4) & 0x0F0F0F0Fu);
-      tile_B[slot][idx].x = (output_value_t(b_value_lower[0]) - 8.0) * scale;
-      tile_B[slot][idx].y = (output_value_t(b_value_upper[0]) - 8.0) * scale;
-      tile_B[slot][idx].z = (output_value_t(b_value_lower[1]) - 8.0) * scale;
-      tile_B[slot][idx].w = (output_value_t(b_value_upper[1]) - 8.0) * scale;
-      tile_B[slot][idx+1].x = (output_value_t(b_value_lower[2]) - 8.0)* scale;
-      tile_B[slot][idx+1].y = (output_value_t(b_value_upper[2]) - 8.0)* scale;
-      tile_B[slot][idx+1].z = (output_value_t(b_value_lower[3]) - 8.0)* scale;
-      tile_B[slot][idx+1].w = (output_value_t(b_value_upper[3]) - 8.0)* scale;
+      tile_B[idx][slot].x = output_value_t(b_value_lower[0]);
+      tile_B[idx][slot].y = output_value_t(b_value_upper[0]);
+      tile_B[idx][slot].z = output_value_t(b_value_lower[1]);
+      tile_B[idx][slot].w = output_value_t(b_value_upper[1]);
+      tile_B[idx][slot] = (tile_B[idx][slot] - input_a_value_t(8.0))*scale;
+      tile_B[idx+1][slot].x = output_value_t(b_value_lower[2]);
+      tile_B[idx+1][slot].y = output_value_t(b_value_upper[2]);
+      tile_B[idx+1][slot].z = output_value_t(b_value_lower[3]);
+      tile_B[idx+1][slot].w = output_value_t(b_value_upper[3]);
+      tile_B[idx+1][slot] = (tile_B[idx+1][slot] - input_a_value_t(8.0))*scale;
     }
 }
 
@@ -453,7 +455,7 @@ fn computeDotProduct(slot_a: u32, a_global : u32, step_idx : u32, sg_id:u32)  ->
   for (var idx:u32 = 0 ; idx < INNER_DIMENSION_ITEMS_PER_CYCLE; idx++)
   {
     var A = subgroupShuffle(local_A, idx);
-    sum += dot(A, tile_B[sg_id][idx]);
+    sum += dot(A, tile_B[idx][sg_id]);
   }
    return sum;
 }
