@@ -536,6 +536,10 @@ Status DP4AMatMulQuantizeProgram::GenerateShaderCode(ShaderHelper& shader) const
   shader.AddOutput("scales", ShaderUsage::UseUniform);
 
   shader.MainFunctionBody() << R"MAIN_FN(
+  if (global_id.x >= uniforms.block_count)
+  {
+    return;
+  }
   var local_a : array<vec4<input_a_element_t>, 8>;
   var max_value:vec4<input_a_element_t> = vec4<input_a_element_t>(0);
   for (var idx:u32=0;idx<8;idx+=1)
@@ -818,14 +822,17 @@ Status MatMulNBits::ComputeInternal(onnxruntime::webgpu::ComputeContext& context
     constexpr uint32_t kU32Components = 4;
 
     constexpr uint32_t kBlockSizeA = 32;
+    constexpr uint32_t kWorkgroupSizeQuantize = 64;
     DP4AMatMulQuantizeProgram quantize_program;
-    quantize_program.SetWorkgroupSize(1);
-    quantize_program.SetDispatchGroupSize(M * K / kBlockSizeA, 1, 1);
+    quantize_program.SetWorkgroupSize(kWorkgroupSizeQuantize);
+    uint32_t quantized_block_count = M * K / kBlockSizeA;
+    quantize_program.SetDispatchGroupSize((quantized_block_count + kWorkgroupSizeQuantize - 1) / kWorkgroupSizeQuantize, 1, 1);
     TensorShape a_quant_shape{1, M, K / kU32Components};
     Tensor a_quant = context.CreateGPUTensor(DataTypeImpl::GetType<uint32_t>(), a_quant_shape);
     TensorShapeVector a_scales_dims({1, 1, M, K / kBlockSizeA});
     Tensor a_scale = context.CreateGPUTensor(a->DataType(), a_scales_dims);
     quantize_program.AddInputs({{a, ProgramTensorMetadataDependency::TypeAndRank, gsl::narrow<int>(kVec4Components)}})
+        .AddUniformVariable({static_cast<uint32_t>(quantized_block_count)})
         .AddOutputs({{&a_quant, ProgramTensorMetadataDependency::Rank, a_quant.Shape(), gsl::narrow<int>(1)},
                      {&a_scale, ProgramTensorMetadataDependency::Rank, a_scale.Shape(), gsl::narrow<int>(1)}});
     ORT_RETURN_IF_ERROR(context.RunProgram(quantize_program));
